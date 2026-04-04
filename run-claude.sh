@@ -1,0 +1,220 @@
+#!/bin/bash
+# Build and run Claude Code in Docker with configurable workspace, auth, and SSH.
+# Container runs detached — re-run this script to attach a new Claude session.
+#
+# Usage:
+#   ./run-claude.sh                        # starts/attaches session "default"
+#   ./run-claude.sh my-project             # starts/attaches session "my-project"
+#   ./run-claude.sh my-project --model opus  # session + claude args
+#   ./run-claude.sh list                   # show running sessions
+#   ./run-claude.sh stop my-project        # stop a session
+#   ./run-claude.sh stop-all               # stop all sessions
+
+set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+# ── Subcommands ──────────────────────────────────────────────────
+case "${1:-}" in
+  list|ls)
+    echo "Running Claude sessions:"
+    docker ps --filter "name=claude-" --format "  {{.Names}}\t{{.Status}}\t{{.RunningFor}}" 2>/dev/null || true
+    exit 0
+    ;;
+  stop)
+    target="${2:?Usage: $0 stop <session-name>}"
+    docker rm -f "claude-${target}" 2>/dev/null && echo "Stopped claude-${target}" || echo "No session named '${target}'"
+    exit 0
+    ;;
+  stop-all)
+    docker ps -q --filter "name=claude-" | xargs -r docker rm -f
+    echo "All Claude sessions stopped."
+    exit 0
+    ;;
+esac
+
+# ── Session name (first arg) ────────────────────────────────────
+SESSION_NAME="${1:-default}"
+shift 2>/dev/null || true
+
+CONF="$SCRIPT_DIR/claude-docker.conf"
+if [ ! -f "$CONF" ]; then
+  echo "ERROR: No claude-docker.conf found."
+  echo "Copy claude-docker.conf.example to claude-docker.conf and edit it."
+  exit 1
+fi
+source "$CONF"
+
+# ── Defaults ─────────────────────────────────────────────────────
+IMAGE_NAME="${IMAGE_NAME:-claude-code}"
+AUTH_METHOD="${AUTH_METHOD:-keychain}"
+SSH_METHOD="${SSH_METHOD:-key-file}"
+PLUGINS_METHOD="${PLUGINS_METHOD:-mount}"
+CLAUDE_DIR="$HOME/.claude"
+
+# ── Validate workspace ───────────────────────────────────────────
+if [ -z "${WORKSPACE_DIR:-}" ] || [ ! -d "$WORKSPACE_DIR" ]; then
+  echo "ERROR: WORKSPACE_DIR is not set or does not exist: ${WORKSPACE_DIR:-<unset>}"
+  exit 1
+fi
+
+# ── Resolve credentials ─────────────────────────────────────────
+CREDS_FILE=""
+EXTRA_ENV=()
+
+case "$AUTH_METHOD" in
+  keychain)
+    if ! command -v security &>/dev/null; then
+      echo "ERROR: AUTH_METHOD=keychain but 'security' command not found (not macOS?)."
+      exit 1
+    fi
+    KEYCHAIN_ACCOUNT="${KEYCHAIN_ACCOUNT:?Set KEYCHAIN_ACCOUNT in claude-docker.conf}"
+    CREDS=$(security find-generic-password -s "Claude Code-credentials" -a "$KEYCHAIN_ACCOUNT" -w 2>/dev/null)
+    if [ -z "$CREDS" ]; then
+      echo "ERROR: Could not read credentials from keychain for account '$KEYCHAIN_ACCOUNT'."
+      echo "Make sure you're logged in via 'claude' on the host first."
+      exit 1
+    fi
+    mkdir -p "$CLAUDE_DIR"
+    CREDS_FILE="$CLAUDE_DIR/.credentials.json"
+    echo "$CREDS" > "$CREDS_FILE"
+    chmod 600 "$CREDS_FILE"
+    ;;
+  file)
+    CREDENTIALS_FILE="${CREDENTIALS_FILE:?Set CREDENTIALS_FILE in claude-docker.conf}"
+    if [ ! -f "$CREDENTIALS_FILE" ]; then
+      echo "ERROR: CREDENTIALS_FILE does not exist: $CREDENTIALS_FILE"
+      exit 1
+    fi
+    CREDS_FILE="$CREDENTIALS_FILE"
+    ;;
+  api-key)
+    ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:?Set ANTHROPIC_API_KEY in claude-docker.conf}"
+    EXTRA_ENV+=(-e "ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY")
+    ;;
+  *)
+    echo "ERROR: Unknown AUTH_METHOD '$AUTH_METHOD'. Use: keychain, file, or api-key."
+    exit 1
+    ;;
+esac
+
+# ── Resolve SSH ──────────────────────────────────────────────────
+SSH_ARGS=()
+
+case "$SSH_METHOD" in
+  key-file)
+    SSH_KEY_PATH="${SSH_KEY_PATH:?Set SSH_KEY_PATH in claude-docker.conf}"
+    if [ ! -f "$SSH_KEY_PATH" ]; then
+      echo "ERROR: SSH_KEY_PATH does not exist: $SSH_KEY_PATH"
+      exit 1
+    fi
+    SSH_ARGS+=(-v "$SSH_KEY_PATH:/home/claude/.ssh/user_key:ro")
+    SSH_ARGS+=(-e "SSH_METHOD=key-file")
+    ;;
+  agent)
+    if [ -z "${SSH_AUTH_SOCK:-}" ]; then
+      echo "ERROR: SSH_METHOD=agent but SSH_AUTH_SOCK is not set. Is ssh-agent running?"
+      exit 1
+    fi
+    SSH_ARGS+=(-v "$SSH_AUTH_SOCK:/run/ssh-agent.sock")
+    SSH_ARGS+=(-e "SSH_AUTH_SOCK=/run/ssh-agent.sock")
+    SSH_ARGS+=(-e "SSH_METHOD=agent")
+    ;;
+  none)
+    SSH_ARGS+=(-e "SSH_METHOD=none")
+    ;;
+  *)
+    echo "ERROR: Unknown SSH_METHOD '$SSH_METHOD'. Use: key-file, agent, or none."
+    exit 1
+    ;;
+esac
+
+# ── Pass extra allowed domains to firewall ───────────────────────
+if [ -n "${EXTRA_ALLOWED_DOMAINS:-}" ]; then
+  EXTRA_ENV+=(-e "EXTRA_ALLOWED_DOMAINS=$EXTRA_ALLOWED_DOMAINS")
+fi
+
+# ── Resolve plugins ──────────────────────────────────────────────
+PLUGIN_ARGS=()
+
+case "$PLUGINS_METHOD" in
+  mount)
+    if [ ! -d "$CLAUDE_DIR/plugins" ]; then
+      echo "WARN: PLUGINS_METHOD=mount but $CLAUDE_DIR/plugins does not exist. Skipping."
+    else
+      # Mount to staging path — entrypoint copies and rewrites paths
+      PLUGIN_ARGS+=(-v "$CLAUDE_DIR/plugins:/mnt/host-plugins:ro")
+      PLUGIN_ARGS+=(-e "HOST_HOME_DIR=$HOME")
+    fi
+    ;;
+  install)
+    PLUGINS_INSTALL_LIST="${PLUGINS_INSTALL_LIST:?Set PLUGINS_INSTALL_LIST in claude-docker.conf}"
+    PLUGIN_ARGS+=(-e "PLUGINS_INSTALL_LIST=$PLUGINS_INSTALL_LIST")
+    ;;
+  none)
+    ;;
+  *)
+    echo "ERROR: Unknown PLUGINS_METHOD '$PLUGINS_METHOD'. Use: mount, install, or none."
+    exit 1
+    ;;
+esac
+PLUGIN_ARGS+=(-e "PLUGINS_METHOD=$PLUGINS_METHOD")
+
+# ── Build ────────────────────────────────────────────────────────
+docker build -t "$IMAGE_NAME" -f "$SCRIPT_DIR/Dockerfile" "$SCRIPT_DIR"
+
+# ── Credential mounts ───────────────────────────────────────────
+# Mount to staging path — entrypoint copies so Claude Code can refresh tokens
+CRED_ARGS=()
+if [ -n "$CREDS_FILE" ]; then
+  CRED_ARGS+=(-v "$CREDS_FILE:/mnt/host-credentials.json:ro")
+fi
+
+# Mount settings.json if it exists
+SETTINGS_ARGS=()
+if [ -f "$CLAUDE_DIR/settings.json" ]; then
+  SETTINGS_ARGS+=(-v "$CLAUDE_DIR/settings.json:/home/claude/.claude/settings.json:ro")
+fi
+
+# Mount .claude.json if it exists (session state)
+SESSION_ARGS=()
+if [ -f "$HOME/.claude.json" ]; then
+  SESSION_ARGS+=(-v "$HOME/.claude.json:/home/claude/.claude.json")
+fi
+
+# ── Container name ───────────────────────────────────────────────
+CONTAINER_NAME="claude-${SESSION_NAME}"
+
+# ── Reconnect if container is already running ────────────────────
+if docker ps --format '{{.Names}}' | grep -q "^${CONTAINER_NAME}$"; then
+  echo "Attaching to existing container '$SESSION_NAME'..."
+  exec docker exec -it "$CONTAINER_NAME" gosu claude claude --dangerously-skip-permissions "$@"
+fi
+
+# Clean up any stopped container with the same name
+docker rm -f "$CONTAINER_NAME" 2>/dev/null || true
+
+# ── Run ──────────────────────────────────────────────────────────
+docker run -d \
+  --name "$CONTAINER_NAME" \
+  --cap-add=NET_ADMIN \
+  --cap-add=NET_RAW \
+  "${EXTRA_ENV[@]+"${EXTRA_ENV[@]}"}" \
+  "${SSH_ARGS[@]+"${SSH_ARGS[@]}"}" \
+  "${CRED_ARGS[@]+"${CRED_ARGS[@]}"}" \
+  "${SETTINGS_ARGS[@]+"${SETTINGS_ARGS[@]}"}" \
+  "${SESSION_ARGS[@]+"${SESSION_ARGS[@]}"}" \
+  "${PLUGIN_ARGS[@]+"${PLUGIN_ARGS[@]}"}" \
+  -v "$WORKSPACE_DIR:/workspace" \
+  "$IMAGE_NAME"
+
+# Wait for setup (firewall, plugins) to finish
+echo "Container started. Waiting for setup..."
+for i in $(seq 1 30); do
+  if docker exec "$CONTAINER_NAME" test -f /tmp/.claude-ready 2>/dev/null; then
+    echo "Attaching..."
+    exec docker exec -it "$CONTAINER_NAME" gosu claude claude --dangerously-skip-permissions "$@"
+  fi
+  sleep 1
+done
+echo "ERROR: Container setup did not complete within 30s. Check: docker logs $CONTAINER_NAME"
+exit 1

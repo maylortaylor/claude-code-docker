@@ -1,0 +1,73 @@
+# Claude Code Docker Configuration
+# Copy this file to claude-docker.conf and edit to match your setup.
+
+# ── Workspace ────────────────────────────────────────────────────
+# Absolute path to the directory you want mounted as /workspace in the container.
+# This is where Claude Code will read and write files.
+WORKSPACE_DIR="/path/to/your/project"
+
+# ── Authentication ───────────────────────────────────────────────
+# How to provide Claude Code credentials. Pick ONE method:
+#
+# Method 1: macOS Keychain (default if on macOS)
+#   Claude Code stores OAuth creds in Keychain after 'claude' login.
+#   Set your macOS username here.
+AUTH_METHOD="keychain"
+KEYCHAIN_ACCOUNT="your-macos-username"
+#
+# Method 2: Credentials file
+#   Point to an existing .credentials.json file on disk.
+#   (e.g. ~/.claude/.credentials.json on Linux after logging in)
+# AUTH_METHOD="file"
+# CREDENTIALS_FILE="$HOME/.claude/.credentials.json"
+#
+# Method 3: API key
+#   Use an Anthropic API key instead of OAuth.
+# AUTH_METHOD="api-key"
+# ANTHROPIC_API_KEY="sk-ant-..."
+
+# ── SSH for Git ──────────────────────────────────────────────────
+# How Claude Code authenticates with GitHub/GitLab for git push/pull.
+# Pick ONE method:
+#
+# Method 1: SSH key file (default)
+#   Path to your private key ON THE HOST. It will be mounted read-only.
+SSH_METHOD="key-file"
+SSH_KEY_PATH="$HOME/.ssh/id_ed25519"
+#
+# Method 2: SSH agent forwarding
+#   Forwards your running ssh-agent into the container.
+#   Make sure ssh-agent is running and your key is added (ssh-add -l).
+# SSH_METHOD="agent"
+#
+# Method 3: No SSH
+#   Use HTTPS for git instead. Claude won't be able to push over SSH.
+# SSH_METHOD="none"
+
+# ── Plugins & Skills ─────────────────────────────────────────────
+# How to provide Claude Code plugins/skills in the container.
+# Pick ONE method:
+#
+# Method 1: Mount from host (default)
+#   Mounts your local ~/.claude/plugins directory read-only into the container.
+#   Fast, uses your exact installed versions. No network fetch needed.
+PLUGINS_METHOD="mount"
+#
+# Method 2: Fresh install
+#   Installs plugins from their marketplace sources at container startup.
+#   Slower (network fetch each run), but gives a clean/latest environment.
+#   List plugin names as they appear in `claude plugins list`.
+# PLUGINS_METHOD="install"
+# PLUGINS_INSTALL_LIST="superpowers commit-commands shipyard context-mode code-simplifier"
+#
+# Method 3: None
+#   No plugins. Bare Claude Code only.
+# PLUGINS_METHOD="none"
+
+# ── Optional ─────────────────────────────────────────────────────
+# Extra domains to allowlist in the firewall (space-separated).
+# GitHub and Anthropic services are always allowed.
+# EXTRA_ALLOWED_DOMAINS="gitlab.com bitbucket.org"
+
+# Docker image name (change if you run multiple configs)
+# IMAGE_NAME="claude-code"
