@@ -55,12 +55,9 @@ done
 set -- "${CLAUDE_ARGS[@]+"${CLAUDE_ARGS[@]}"}"
 
 CONF="$SCRIPT_DIR/claude-docker.conf"
-if [ ! -f "$CONF" ]; then
-  echo "ERROR: No claude-docker.conf found."
-  echo "Copy claude-docker.conf.example to claude-docker.conf and edit it."
-  exit 1
+if [ -f "$CONF" ]; then
+  source "$CONF"
 fi
-source "$CONF"
 
 # ── Defaults ─────────────────────────────────────────────────────
 IMAGE_NAME="${IMAGE_NAME:-claude-code}"
@@ -91,7 +88,7 @@ case "$AUTH_METHOD" in
       echo "ERROR: AUTH_METHOD=keychain but 'security' command not found (not macOS?)."
       exit 1
     fi
-    KEYCHAIN_ACCOUNT="${KEYCHAIN_ACCOUNT:?Set KEYCHAIN_ACCOUNT in claude-docker.conf}"
+    KEYCHAIN_ACCOUNT="${KEYCHAIN_ACCOUNT:-$(whoami)}"
     CREDS=$(security find-generic-password -s "Claude Code-credentials" -a "$KEYCHAIN_ACCOUNT" -w 2>/dev/null)
     if [ -z "$CREDS" ]; then
       echo "ERROR: Could not read credentials from keychain for account '$KEYCHAIN_ACCOUNT'."
