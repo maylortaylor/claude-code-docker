@@ -33,12 +33,11 @@ The official devcontainer is designed for IDE integration. If you want to:
 
 ```bash
 # 1. Clone
-git clone https://github.com/yourusername/claude-code-docker.git
+git clone https://github.com/cdowin/claude-code-docker.git
 cd claude-code-docker
 
-# 2. Configure
+# 2. (Optional) Configure — works without a conf on macOS with keychain auth
 cp claude-docker.conf.example claude-docker.conf
-# Edit claude-docker.conf — set auth at minimum (workspace defaults to $PWD)
 
 # 3. Run
 ./run-claude.sh
@@ -106,6 +105,26 @@ All configuration lives in `claude-docker.conf` (gitignored). See `claude-docker
 | `mount` | Copy plugins from host `~/.claude/plugins` (fast, no network) |
 | `install` | Fresh install from marketplace at startup (always latest) |
 | `none` | No plugins |
+
+### Settings
+
+Your host `~/.claude/settings.json` is mounted into the container automatically. Any settings you configure locally apply inside Docker too.
+
+Some features worth enabling:
+
+```json
+{
+  "env": {
+    "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1"
+  }
+}
+```
+
+| Setting | What it does |
+|---------|-------------|
+| `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS` | Enables [agent teams](https://code.claude.com/docs/en/agent-teams) — multiple Claude sessions coordinating via shared task list |
+
+See `settings.json.example` for a full example.
 
 ## How it works
 
