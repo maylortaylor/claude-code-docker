@@ -13,8 +13,9 @@ chown -R claude:claude /home/claude/.claude 2>/dev/null || true
 chown -R claude:claude /workspace 2>/dev/null || true
 
 # Copy .claude.json so container has its own writable copy (host file is ro)
+# Override installMethod so Claude reads credentials from file, not keychain
 if [ -f /mnt/host-claude.json ]; then
-  cp /mnt/host-claude.json /home/claude/.claude.json
+  sed 's/"installMethod":\s*"[^"]*"/"installMethod": "npm"/' /mnt/host-claude.json > /home/claude/.claude.json
   chown claude:claude /home/claude/.claude.json
 fi
 
