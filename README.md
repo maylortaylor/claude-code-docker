@@ -27,7 +27,7 @@ The official devcontainer is designed for IDE integration. If you want to:
 | **Multiple sessions** | One per window | Named sessions, run in parallel |
 | **Auth** | Manual setup | Keychain / credential file / API key |
 | **SSH** | Manual setup | Key file / agent forwarding / none |
-| **Plugins** | Manual install | Mount from host or auto-install |
+| **Plugins** | Manual install | Shared via `~/.claude` mount |
 
 ## Quick start
 
@@ -98,17 +98,9 @@ All configuration lives in `claude-docker.conf` (gitignored). See `claude-docker
 | `agent` | Forward your ssh-agent into the container |
 | `none` | Use HTTPS for git, no SSH |
 
-### Plugins (pick one)
+### Claude state
 
-| Method | When to use |
-|--------|------------|
-| `mount` | Copy plugins from host `~/.claude/plugins` (fast, no network) |
-| `install` | Fresh install from marketplace at startup (always latest) |
-| `none` | No plugins |
-
-### Settings
-
-Your host `~/.claude/settings.json` is mounted into the container automatically. Any settings you configure locally apply inside Docker too.
+Your entire `~/.claude` directory is mounted read-write into the container. This means the container shares your host's identity — settings, credentials, plugins, onboarding state, session history all carry over. No separate setup needed.
 
 See `settings.json.example` for recommended settings:
 
@@ -155,7 +147,7 @@ run-claude.sh
 │   └── entrypoint.sh (runs as root)
 │       ├── init-firewall.sh — iptables allowlist (Anthropic API, GitHub, SSH)
 │       ├── Strip suid/sgid bits
-│       ├── Copy credentials, SSH keys, plugins
+│       ├── Configure SSH keys
 │       ├── Touch /tmp/.claude-ready
 │       └── sleep infinity (keeps container alive)
 └── docker exec — runs Claude Code as non-root user
@@ -166,7 +158,7 @@ run-claude.sh
 - **Network firewall**: Only Anthropic API, GitHub, and SSH traffic allowed. Everything else is rejected at the iptables level. Add more domains via `EXTRA_ALLOWED_DOMAINS`.
 - **Non-root execution**: Claude Code runs as an unprivileged `claude` user. Entrypoint runs as root only for firewall setup, then drops privileges.
 - **No suid/sgid**: All suid/sgid bits stripped after firewall setup.
-- **Read-only mounts**: Credentials, SSH keys, and plugins are mounted read-only and copied inside the container.
+- **Shared state**: `~/.claude` is mounted read-write so the container behaves as your host's Claude identity. SSH keys are mounted read-only.
 
 ## Requirements
 

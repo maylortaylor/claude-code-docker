@@ -63,7 +63,6 @@ fi
 IMAGE_NAME="${IMAGE_NAME:-claude-code}"
 AUTH_METHOD="${AUTH_METHOD:-keychain}"
 SSH_METHOD="${SSH_METHOD:-key-file}"
-PLUGINS_METHOD="${PLUGINS_METHOD:-mount}"
 CLAUDE_DIR="$HOME/.claude"
 
 # ── Resolve workspace: override > conf > $PWD ────────────────────
@@ -161,46 +160,15 @@ if [ -n "${EXTRA_ALLOWED_DOMAINS:-}" ]; then
   EXTRA_ENV+=(-e "EXTRA_ALLOWED_DOMAINS=$EXTRA_ALLOWED_DOMAINS")
 fi
 
-# ── Resolve plugins ──────────────────────────────────────────────
-PLUGIN_ARGS=()
-
-case "$PLUGINS_METHOD" in
-  mount)
-    if [ ! -d "$CLAUDE_DIR/plugins" ]; then
-      echo "WARN: PLUGINS_METHOD=mount but $CLAUDE_DIR/plugins does not exist. Skipping."
-    else
-      # Mount to staging path — entrypoint copies and rewrites paths
-      PLUGIN_ARGS+=(-v "$CLAUDE_DIR/plugins:/mnt/host-plugins:ro")
-      PLUGIN_ARGS+=(-e "HOST_HOME_DIR=$HOME")
-    fi
-    ;;
-  install)
-    PLUGINS_INSTALL_LIST="${PLUGINS_INSTALL_LIST:?Set PLUGINS_INSTALL_LIST in claude-docker.conf}"
-    PLUGIN_ARGS+=(-e "PLUGINS_INSTALL_LIST=$PLUGINS_INSTALL_LIST")
-    ;;
-  none)
-    ;;
-  *)
-    echo "ERROR: Unknown PLUGINS_METHOD '$PLUGINS_METHOD'. Use: mount, install, or none."
-    exit 1
-    ;;
-esac
-PLUGIN_ARGS+=(-e "PLUGINS_METHOD=$PLUGINS_METHOD")
-
 # ── Build ────────────────────────────────────────────────────────
 docker build -t "$IMAGE_NAME" -f "$SCRIPT_DIR/Dockerfile" "$SCRIPT_DIR"
 
-# ── Credential mounts ───────────────────────────────────────────
-# Mount to staging path — entrypoint copies so Claude Code can refresh tokens
-CRED_ARGS=()
-if [ -n "$CREDS_FILE" ]; then
-  CRED_ARGS+=(-v "$CREDS_FILE:/mnt/host-credentials.json:ro")
-fi
-
-# Mount settings.json if it exists
-SETTINGS_ARGS=()
-if [ -f "$CLAUDE_DIR/settings.json" ]; then
-  SETTINGS_ARGS+=(-v "$CLAUDE_DIR/settings.json:/home/claude/.claude/settings.json:ro")
+# ── Claude state mount ──────────────────────────────────────────
+# Mount the entire ~/.claude directory so all state carries over:
+# credentials, settings, statsig, onboarding, session history, etc.
+CLAUDE_STATE_ARGS=()
+if [ -d "$CLAUDE_DIR" ]; then
+  CLAUDE_STATE_ARGS+=(-v "$CLAUDE_DIR:/home/claude/.claude")
 fi
 
 # Mount .claude.json if it exists (session state)
@@ -232,10 +200,8 @@ docker run -d \
   --cap-add=NET_RAW \
   "${EXTRA_ENV[@]+"${EXTRA_ENV[@]}"}" \
   "${SSH_ARGS[@]+"${SSH_ARGS[@]}"}" \
-  "${CRED_ARGS[@]+"${CRED_ARGS[@]}"}" \
-  "${SETTINGS_ARGS[@]+"${SETTINGS_ARGS[@]}"}" \
+  "${CLAUDE_STATE_ARGS[@]+"${CLAUDE_STATE_ARGS[@]}"}" \
   "${SESSION_ARGS[@]+"${SESSION_ARGS[@]}"}" \
-  "${PLUGIN_ARGS[@]+"${PLUGIN_ARGS[@]}"}" \
   -v "$WORKSPACE_DIR:/workspace" \
   "$IMAGE_NAME"
 

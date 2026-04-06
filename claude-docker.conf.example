@@ -46,26 +46,6 @@ SSH_KEY_PATH="$HOME/.ssh/id_ed25519"
 #   Use HTTPS for git instead. Claude won't be able to push over SSH.
 # SSH_METHOD="none"
 
-# ── Plugins & Skills ─────────────────────────────────────────────
-# How to provide Claude Code plugins/skills in the container.
-# Pick ONE method:
-#
-# Method 1: Mount from host (default)
-#   Mounts your local ~/.claude/plugins directory read-only into the container.
-#   Fast, uses your exact installed versions. No network fetch needed.
-PLUGINS_METHOD="mount"
-#
-# Method 2: Fresh install
-#   Installs plugins from their marketplace sources at container startup.
-#   Slower (network fetch each run), but gives a clean/latest environment.
-#   List plugin names as they appear in `claude plugins list`.
-# PLUGINS_METHOD="install"
-# PLUGINS_INSTALL_LIST="superpowers commit-commands shipyard context-mode code-simplifier"
-#
-# Method 3: None
-#   No plugins. Bare Claude Code only.
-# PLUGINS_METHOD="none"
-
 # ── Optional ─────────────────────────────────────────────────────
 # Extra domains to allowlist in the firewall (space-separated).
 # GitHub and Anthropic services are always allowed.
