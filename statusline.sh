@@ -234,7 +234,54 @@ else
   fi
 fi
 
-# Session reset time requires ccusage (only feature that needs external tool)
+# ---- token expiry (from credentials file, no external tools needed) ----
+token_txt=""; token_pct=0; token_bar=""
+token_color() {
+  if [ "$use_color" -eq 1 ]; then printf '\033[38;5;194m'; fi  # default green
+}
+
+CREDS_FILE="$HOME/.claude/.credentials.json"
+if [ -f "$CREDS_FILE" ]; then
+  if [ "$HAS_JQ" -eq 1 ]; then
+    expires_ms=$(cat "$CREDS_FILE" | jq -r '.claudeAiOauth.expiresAt // empty' 2>/dev/null)
+  else
+    expires_ms=$(grep -o '"expiresAt"[[:space:]]*:[[:space:]]*[0-9]*' "$CREDS_FILE" | sed 's/.*:[[:space:]]*\([0-9]*\).*/\1/')
+  fi
+
+  if [ -n "$expires_ms" ]; then
+    expires_sec=$(( expires_ms / 1000 ))
+    now_sec=$(date +%s)
+    token_remaining=$(( expires_sec - now_sec ))
+
+    if [ "$token_remaining" -le 0 ]; then
+      token_txt="EXPIRED"
+      token_color() { if [ "$use_color" -eq 1 ]; then printf '\033[38;5;203m'; fi; }
+    else
+      # Assume ~1h token lifetime for percentage
+      token_lifetime=3600
+      token_elapsed=$(( token_lifetime - token_remaining ))
+      (( token_elapsed < 0 )) && token_elapsed=0
+      (( token_elapsed > token_lifetime )) && token_elapsed=$token_lifetime
+      token_pct=$(( token_elapsed * 100 / token_lifetime ))
+
+      tm=$(( token_remaining / 60 ))
+      ts=$(( token_remaining % 60 ))
+      token_expiry_hm=$(fmt_time_hm "$expires_sec")
+      token_txt="$(printf '%dm %ds (expires %s)' "$tm" "$ts" "$token_expiry_hm")"
+      token_bar=$(progress_bar "$token_pct" 10)
+
+      if [ "$token_remaining" -le 300 ]; then
+        token_color() { if [ "$use_color" -eq 1 ]; then printf '\033[38;5;203m'; fi; }  # red <5m
+      elif [ "$token_remaining" -le 900 ]; then
+        token_color() { if [ "$use_color" -eq 1 ]; then printf '\033[38;5;215m'; fi; }  # orange <15m
+      elif [ "$token_remaining" -le 1800 ]; then
+        token_color() { if [ "$use_color" -eq 1 ]; then printf '\033[38;5;228m'; fi; }  # yellow <30m
+      fi
+    fi
+  fi
+fi
+
+# ---- session reset (from ccusage when available) ----
 if command -v ccusage >/dev/null 2>&1 && [ "$HAS_JQ" -eq 1 ]; then
   blocks_output=""
 
@@ -250,7 +297,6 @@ if command -v ccusage >/dev/null 2>&1 && [ "$HAS_JQ" -eq 1 ]; then
   if [ -n "$blocks_output" ]; then
     active_block=$(echo "$blocks_output" | jq -c '.blocks[] | select(.isActive == true)' 2>/dev/null | head -n1)
     if [ -n "$active_block" ]; then
-      # Session time calculation from ccusage
       reset_time_str=$(echo "$active_block" | jq -r '.usageLimitResetTime // .endTime // empty')
       start_time_str=$(echo "$active_block" | jq -r '.startTime // empty')
 
@@ -311,31 +357,39 @@ if [ -n "$output_style" ] && [ "$output_style" != "null" ]; then
   printf '  🎨 %s%s%s' "$(style_color)" "$output_style" "$(rst)"
 fi
 
-# Line 2: Context and session time
+# Line 2: Context window
 line2=""
 if [ -n "$context_pct" ]; then
   context_bar=$(progress_bar "$context_used_pct" 10)
   line2="🧠 $(context_color)Context Used: ${context_pct} [${context_bar}]$(rst)"
-fi
-if [ -n "$session_txt" ]; then
-  if [ -n "$line2" ]; then
-    line2="$line2  ⌛ $(session_color)${session_txt}$(rst) $(session_color)[${session_bar}]$(rst)"
-  else
-    line2="⌛ $(session_color)${session_txt}$(rst) $(session_color)[${session_bar}]$(rst)"
-  fi
-fi
-if [ -z "$line2" ] && [ -z "$context_pct" ]; then
+else
   line2="🧠 $(context_color)Context Used: TBD$(rst)"
 fi
 
-# Line 3: Token usage
+# Line 3: Timers (token expiry + session reset)
 line3=""
+if [ -n "$token_txt" ]; then
+  line3="🔑 $(token_color)Token: ${token_txt}$(rst)"
+  if [ -n "$token_bar" ]; then
+    line3="$line3 $(token_color)[${token_bar}]$(rst)"
+  fi
+fi
+if [ -n "$session_txt" ]; then
+  if [ -n "$line3" ]; then
+    line3="$line3  ⌛ $(session_color)${session_txt}$(rst) $(session_color)[${session_bar}]$(rst)"
+  else
+    line3="⌛ $(session_color)${session_txt}$(rst) $(session_color)[${session_bar}]$(rst)"
+  fi
+fi
+
+# Line 4: Token usage
+line4=""
 if [ -n "$tot_tokens" ] && [[ "$tot_tokens" =~ ^[0-9]+$ ]]; then
   if [ -n "$tpm" ] && [[ "$tpm" =~ ^[0-9.]+$ ]]; then
     tpm_formatted=$(printf '%.0f' "$tpm")
-    line3="📊 $(usage_color)${tot_tokens} tok (${tpm_formatted} tpm)$(rst)"
+    line4="📊 $(usage_color)${tot_tokens} tok (${tpm_formatted} tpm)$(rst)"
   else
-    line3="📊 $(usage_color)${tot_tokens} tok$(rst)"
+    line4="📊 $(usage_color)${tot_tokens} tok$(rst)"
   fi
 fi
 
@@ -345,5 +399,8 @@ if [ -n "$line2" ]; then
 fi
 if [ -n "$line3" ]; then
   printf '\n%s' "$line3"
+fi
+if [ -n "$line4" ]; then
+  printf '\n%s' "$line4"
 fi
 printf '\n'
