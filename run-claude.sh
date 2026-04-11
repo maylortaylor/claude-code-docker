@@ -54,7 +54,7 @@ while [ $# -gt 0 ]; do
 done
 set -- "${CLAUDE_ARGS[@]+"${CLAUDE_ARGS[@]}"}"
 
-CONF="$SCRIPT_DIR/claude-docker.conf"
+CONF="${CLAUDE_DOCKER_CONF:-$SCRIPT_DIR/claude-docker.conf}"
 if [ -f "$CONF" ]; then
   source "$CONF"
 fi
@@ -63,7 +63,7 @@ fi
 IMAGE_NAME="${IMAGE_NAME:-claude-code}"
 AUTH_METHOD="${AUTH_METHOD:-keychain}"
 SSH_METHOD="${SSH_METHOD:-key-file}"
-CLAUDE_DIR="$HOME/.claude"
+CLAUDE_DIR="${CLAUDE_STATE_DIR:-$HOME/.claude}"
 
 # ── Resolve workspace: override > conf > $PWD ────────────────────
 if [ -n "$WORKSPACE_OVERRIDE" ]; then
@@ -107,8 +107,18 @@ case "$AUTH_METHOD" in
     CREDS_FILE="$CREDENTIALS_FILE"
     ;;
   api-key)
-    ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:?Set ANTHROPIC_API_KEY in claude-docker.conf}"
-    EXTRA_ENV+=(-e "ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY")
+    if [ -n "${ANTHROPIC_API_KEY:-}" ]; then
+      EXTRA_ENV+=(-e "ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY")
+    elif [ -n "${ANTHROPIC_AUTH_TOKEN:-}" ]; then
+      EXTRA_ENV+=(-e "ANTHROPIC_AUTH_TOKEN=$ANTHROPIC_AUTH_TOKEN")
+    else
+      echo "ERROR: AUTH_METHOD=api-key requires ANTHROPIC_API_KEY or ANTHROPIC_AUTH_TOKEN to be set."
+      exit 1
+    fi
+    [ -n "${ANTHROPIC_BASE_URL:-}" ]             && EXTRA_ENV+=(-e "ANTHROPIC_BASE_URL=$ANTHROPIC_BASE_URL")
+    [ -n "${ANTHROPIC_DEFAULT_OPUS_MODEL:-}" ]   && EXTRA_ENV+=(-e "ANTHROPIC_DEFAULT_OPUS_MODEL=$ANTHROPIC_DEFAULT_OPUS_MODEL")
+    [ -n "${ANTHROPIC_DEFAULT_SONNET_MODEL:-}" ] && EXTRA_ENV+=(-e "ANTHROPIC_DEFAULT_SONNET_MODEL=$ANTHROPIC_DEFAULT_SONNET_MODEL")
+    [ -n "${ANTHROPIC_DEFAULT_HAIKU_MODEL:-}" ]  && EXTRA_ENV+=(-e "ANTHROPIC_DEFAULT_HAIKU_MODEL=$ANTHROPIC_DEFAULT_HAIKU_MODEL")
     ;;
   *)
     echo "ERROR: Unknown AUTH_METHOD '$AUTH_METHOD'. Use: keychain, file, or api-key."
@@ -176,6 +186,11 @@ if [ -n "$CREDS_FILE" ]; then
   CRED_ARGS+=(-v "$CREDS_FILE:/mnt/host-credentials.json:ro")
 fi
 
+# ── Mac filesystem mounts ─────────────────────────────────────────────────────
+MAC_FS_ARGS=()
+[ -d "$HOME/Documents/_dev" ] && MAC_FS_ARGS+=(-v "$HOME/Documents/_dev:/mac/_dev")
+[ -f "$HOME/.zshrc" ]         && MAC_FS_ARGS+=(-v "$HOME/.zshrc:/mac/.zshrc")
+
 # ── Container name ───────────────────────────────────────────────
 CONTAINER_NAME="claude-${SESSION_NAME}"
 
@@ -201,17 +216,18 @@ docker run -d \
   "${SSH_ARGS[@]+"${SSH_ARGS[@]}"}" \
   "${CLAUDE_STATE_ARGS[@]+"${CLAUDE_STATE_ARGS[@]}"}" \
   "${CRED_ARGS[@]+"${CRED_ARGS[@]}"}" \
+  "${MAC_FS_ARGS[@]+"${MAC_FS_ARGS[@]}"}" \
   -v "$WORKSPACE_DIR:/workspace" \
   "$IMAGE_NAME"
 
 # Wait for setup (firewall, plugins) to finish
 echo "Container started. Waiting for setup..."
-for i in $(seq 1 30); do
+for i in $(seq 1 60); do
   if docker exec "$CONTAINER_NAME" test -f /tmp/.claude-ready 2>/dev/null; then
     echo "Attaching..."
     exec docker exec -it "$CONTAINER_NAME" gosu claude claude --dangerously-skip-permissions "$@"
   fi
   sleep 1
 done
-echo "ERROR: Container setup did not complete within 30s. Check: docker logs $CONTAINER_NAME"
+echo "ERROR: Container setup did not complete within 60s. Check: docker logs $CONTAINER_NAME"
 exit 1

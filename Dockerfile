@@ -4,6 +4,7 @@ ARG CLAUDE_CODE_VERSION=latest
 
 # Install tools Claude Code needs + firewall deps + PDF generation
 RUN apt-get update && apt-get install -y --no-install-recommends \
+  ca-certificates \
   curl \
   git \
   openssh-client \
@@ -23,7 +24,6 @@ RUN useradd -m -s /bin/bash claude && \
   mkdir -p /home/claude/.claude /workspace && \
   chown -R claude:claude /home/claude /workspace
 
-# Install Claude Code via npm
 ENV DEVCONTAINER=true
 RUN npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}
 
