@@ -12,6 +12,15 @@ find /usr /bin /sbin -perm /6000 -type f -exec chmod a-s {} + 2>/dev/null || tru
 chown -R claude:claude /home/claude/.claude 2>/dev/null || true
 chown -R claude:claude /workspace 2>/dev/null || true
 
+# Symlink host user's home path so plugin absolute paths resolve inside container.
+# Marketplace configs store the host's absolute path (e.g. /Users/cdowin/.claude/...)
+# which doesn't exist in the container where ~/.claude is at /home/claude/.claude.
+HOST_HOME="${HOST_HOME:-}"
+if [ -n "$HOST_HOME" ] && [ "$HOST_HOME" != "/home/claude" ]; then
+  mkdir -p "$(dirname "$HOST_HOME")"
+  ln -sfn /home/claude "$HOST_HOME"
+fi
+
 # Copy credentials extracted from host keychain (overwrites mounted version)
 if [ -f /mnt/host-credentials.json ]; then
   cp /mnt/host-credentials.json /home/claude/.claude/.credentials.json

@@ -172,11 +172,10 @@ fi
 usage_color() { if [ "$use_color" -eq 1 ]; then printf '\033[38;5;189m'; fi; }  # lavender
 cost_color() { if [ "$use_color" -eq 1 ]; then printf '\033[38;5;222m'; fi; }   # light gold
 burn_color() { if [ "$use_color" -eq 1 ]; then printf '\033[38;5;220m'; fi; }   # bright gold
-session_color() { 
-  rem_pct=$(( 100 - session_pct ))
-  if   (( rem_pct <= 10 )); then SCLR='38;5;210'  # light pink
-  elif (( rem_pct <= 25 )); then SCLR='38;5;228'  # light yellow  
-  else                          SCLR='38;5;194'; fi  # light green
+session_color() {
+  if   (( session_pct >= 90 )); then SCLR='38;5;203'   # red >=90%
+  elif (( session_pct >= 70 )); then SCLR='38;5;228'   # yellow >=70%
+  else                               SCLR='38;5;158'; fi  # green <70%
   if [ "$use_color" -eq 1 ]; then printf '\033[%sm' "$SCLR"; fi
 }
 
@@ -234,19 +233,15 @@ else
   fi
 fi
 
-# ---- token expiry (from credentials file, no external tools needed) ----
+# ---- token expiry (from credentials file) ----
 token_txt=""; token_pct=0; token_bar=""
 token_color() {
   if [ "$use_color" -eq 1 ]; then printf '\033[38;5;194m'; fi  # default green
 }
 
 CREDS_FILE="$HOME/.claude/.credentials.json"
-if [ -f "$CREDS_FILE" ]; then
-  if [ "$HAS_JQ" -eq 1 ]; then
-    expires_ms=$(cat "$CREDS_FILE" | jq -r '.claudeAiOauth.expiresAt // empty' 2>/dev/null)
-  else
-    expires_ms=$(grep -o '"expiresAt"[[:space:]]*:[[:space:]]*[0-9]*' "$CREDS_FILE" | sed 's/.*:[[:space:]]*\([0-9]*\).*/\1/')
-  fi
+if [ -f "$CREDS_FILE" ] && [ "$HAS_JQ" -eq 1 ]; then
+  expires_ms=$(jq -r '.claudeAiOauth.expiresAt // empty' "$CREDS_FILE" 2>/dev/null)
 
   if [ -n "$expires_ms" ]; then
     expires_sec=$(( expires_ms / 1000 ))
@@ -257,58 +252,44 @@ if [ -f "$CREDS_FILE" ]; then
       token_txt="EXPIRED"
       token_color() { if [ "$use_color" -eq 1 ]; then printf '\033[38;5;203m'; fi; }
     else
-      # Assume ~1h token lifetime for percentage
-      token_lifetime=3600
-      token_elapsed=$(( token_lifetime - token_remaining ))
-      (( token_elapsed < 0 )) && token_elapsed=0
-      (( token_elapsed > token_lifetime )) && token_elapsed=$token_lifetime
-      token_pct=$(( token_elapsed * 100 / token_lifetime ))
-
-      tm=$(( token_remaining / 60 ))
-      ts=$(( token_remaining % 60 ))
       token_expiry_hm=$(fmt_time_hm "$expires_sec")
-      token_txt="$(printf '%dm %ds (expires %s)' "$tm" "$ts" "$token_expiry_hm")"
-      token_bar=$(progress_bar "$token_pct" 10)
-
-      if [ "$token_remaining" -le 300 ]; then
-        token_color() { if [ "$use_color" -eq 1 ]; then printf '\033[38;5;203m'; fi; }  # red <5m
-      elif [ "$token_remaining" -le 900 ]; then
-        token_color() { if [ "$use_color" -eq 1 ]; then printf '\033[38;5;215m'; fi; }  # orange <15m
-      elif [ "$token_remaining" -le 1800 ]; then
-        token_color() { if [ "$use_color" -eq 1 ]; then printf '\033[38;5;228m'; fi; }  # yellow <30m
+      if [ "$token_remaining" -lt 3600 ]; then
+        token_color() { if [ "$use_color" -eq 1 ]; then printf '\033[38;5;203m'; fi; }  # red <1h
+      elif [ "$token_remaining" -lt 7200 ]; then
+        token_color() { if [ "$use_color" -eq 1 ]; then printf '\033[38;5;228m'; fi; }  # yellow <2h
       fi
+      token_txt="$(token_color)●$(rst) Expires $token_expiry_hm"
     fi
   fi
 fi
 
-# ---- session reset (from ccusage when available) ----
-if command -v ccusage >/dev/null 2>&1 && [ "$HAS_JQ" -eq 1 ]; then
-  blocks_output=""
+# ---- rate limits (native from Claude Code stdin, available since v2.1.80) ----
+if [ "$HAS_JQ" -eq 1 ]; then
+  five_hr_pct=$(echo "$input" | jq -r '.rate_limits.five_hour.used_percentage // empty' 2>/dev/null)
+  five_hr_reset=$(echo "$input" | jq -r '.rate_limits.five_hour.resets_at // empty' 2>/dev/null)
+  seven_day_pct=$(echo "$input" | jq -r '.rate_limits.seven_day.used_percentage // empty' 2>/dev/null)
 
-  # Try ccusage with timeout
-  if command -v timeout >/dev/null 2>&1; then
-    blocks_output=$(timeout 5s ccusage blocks --json 2>/dev/null)
-  elif command -v gtimeout >/dev/null 2>&1; then
-    blocks_output=$(gtimeout 5s ccusage blocks --json 2>/dev/null)
-  else
-    blocks_output=$(ccusage blocks --json 2>/dev/null)
+  if [ -n "$five_hr_pct" ]; then
+    session_pct=$(printf '%.0f' "$five_hr_pct")
+    session_bar=$(progress_bar "$session_pct" 10)
+
+    if [ -n "$five_hr_reset" ]; then
+      now_sec=$(date +%s)
+      remaining=$(( five_hr_reset - now_sec )); (( remaining < 0 )) && remaining=0
+      rh=$(( remaining / 3600 )); rm=$(( (remaining % 3600) / 60 ))
+      end_hm=$(fmt_time_hm "$five_hr_reset")
+      session_time="$(printf '%dh %dm left' "$rh" "$rm")"
+      session_reset="$(printf 'Reset @ %s' "$end_hm")"
+      session_txt="$(printf '%s · %d%% [%s] · %s' "$session_time" "$session_pct" "$session_bar" "$session_reset")"
+      session_bar=""
+    else
+      session_txt="$(printf '%d%% [%s]' "$session_pct" "$session_bar")"
+      session_bar=""
+    fi
   fi
 
-  if [ -n "$blocks_output" ]; then
-    active_block=$(echo "$blocks_output" | jq -c '.blocks[] | select(.isActive == true)' 2>/dev/null | head -n1)
-    if [ -n "$active_block" ]; then
-      reset_time_str=$(echo "$active_block" | jq -r '.usageLimitResetTime // .endTime // empty')
-      start_time_str=$(echo "$active_block" | jq -r '.startTime // empty')
-
-      if [ -n "$reset_time_str" ] && [ -n "$start_time_str" ]; then
-        start_sec=$(to_epoch "$start_time_str"); end_sec=$(to_epoch "$reset_time_str"); now_sec=$(date +%s)
-        total=$(( end_sec - start_sec )); (( total<1 )) && total=1
-        elapsed=$(( now_sec - start_sec )); (( elapsed<0 ))&&elapsed=0; (( elapsed>total ))&&elapsed=$total
-        session_pct=$(( elapsed * 100 / total ))
-        session_txt="${session_pct}%"
-        session_bar=$(progress_bar "$session_pct" 10)
-      fi
-    fi
+  if [ -n "$seven_day_pct" ]; then
+    weekly_pct=$(printf '%.0f' "$seven_day_pct")
   fi
 fi
 
@@ -354,7 +335,7 @@ if [ -n "$output_style" ] && [ "$output_style" != "null" ]; then
   printf '  🎨 %s%s%s' "$(style_color)" "$output_style" "$(rst)"
 fi
 
-# Line 2: Context + token expiry
+# Line 2: Context + auth token
 line2=""
 if [ -n "$context_pct" ]; then
   context_bar=$(progress_bar "$context_used_pct" 10)
@@ -363,13 +344,10 @@ else
   line2="🧠 $(context_color)Context Used: TBD$(rst)"
 fi
 if [ -n "$token_txt" ]; then
-  line2="$line2  🔑 $(token_color)Auth: ${token_txt}$(rst)"
-  if [ -n "$token_bar" ]; then
-    line2="$line2 $(token_color)[${token_bar}]$(rst)"
-  fi
+  line2="$line2  🔑 $(token_color)${token_txt}$(rst)"
 fi
 
-# Line 3: Token throughput + session reset
+# Line 3: Token usage + session reset
 line3=""
 if [ -n "$tot_tokens" ] && [[ "$tot_tokens" =~ ^[0-9]+$ ]]; then
   if [ -n "$tpm" ] && [[ "$tpm" =~ ^[0-9.]+$ ]]; then
@@ -381,9 +359,9 @@ if [ -n "$tot_tokens" ] && [[ "$tot_tokens" =~ ^[0-9]+$ ]]; then
 fi
 if [ -n "$session_txt" ]; then
   if [ -n "$line3" ]; then
-    line3="$line3  ⌛ $(session_color)Session Used: ${session_txt} [${session_bar}]$(rst)"
+    line3="$line3  ⌛ $(session_color)${session_txt}$(rst)"
   else
-    line3="⌛ $(session_color)Session Used: ${session_txt} [${session_bar}]$(rst)"
+    line3="⌛ $(session_color)${session_txt}$(rst)"
   fi
 fi
 

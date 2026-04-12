@@ -197,6 +197,7 @@ docker run -d \
   --name "$CONTAINER_NAME" \
   --cap-add=NET_ADMIN \
   --cap-add=NET_RAW \
+  -e "HOST_HOME=$HOME" \
   "${EXTRA_ENV[@]+"${EXTRA_ENV[@]}"}" \
   "${SSH_ARGS[@]+"${SSH_ARGS[@]}"}" \
   "${CLAUDE_STATE_ARGS[@]+"${CLAUDE_STATE_ARGS[@]}"}" \
