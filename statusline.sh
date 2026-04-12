@@ -293,30 +293,6 @@ if [ "$HAS_JQ" -eq 1 ]; then
   fi
 fi
 
-# ---- weekly cost (cached, refreshes every 5 minutes) ----
-weekly_cost=""
-weekly_cache="/tmp/.ccusage_weekly_cache"
-cache_max_age=300  # 5 minutes
-
-needs_refresh=1
-if [ -f "$weekly_cache" ]; then
-  if command -v stat >/dev/null 2>&1; then
-    cache_mtime=$(stat -f %m "$weekly_cache" 2>/dev/null || stat -c %Y "$weekly_cache" 2>/dev/null || echo 0)
-    now_sec=$(date +%s)
-    cache_age=$(( now_sec - cache_mtime ))
-    [ "$cache_age" -lt "$cache_max_age" ] && needs_refresh=0
-  fi
-fi
-
-if [ "$needs_refresh" -eq 1 ] && command -v ccusage >/dev/null 2>&1 && [ "$HAS_JQ" -eq 1 ]; then
-  weekly_json=$(ccusage weekly --json --offline 2>/dev/null)
-  if [ -n "$weekly_json" ]; then
-    weekly_cost=$(echo "$weekly_json" | jq -r '.weekly[-1].totalCost // 0' 2>/dev/null | awk '{printf "%.2f", $1}')
-    echo "$weekly_cost" > "$weekly_cache" 2>/dev/null
-  fi
-elif [ -f "$weekly_cache" ]; then
-  weekly_cost=$(cat "$weekly_cache" 2>/dev/null)
-fi
 
 # ---- render statusline ----
 # Line 1: Core info (directory, git, model, claude code version, output style)
