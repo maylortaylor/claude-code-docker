@@ -4,6 +4,7 @@ ARG CLAUDE_CODE_VERSION=latest
 
 # Install tools Claude Code needs + firewall deps + PDF generation
 RUN apt-get update && apt-get install -y --no-install-recommends \
+  ca-certificates \
   curl \
   git \
   openssh-client \
@@ -17,8 +18,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
   python3 \
   pandoc \
   weasyprint \
-  && apt-get clean && rm -rf /var/lib/apt/lists/* \
-  && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg -o /usr/share/keyrings/githubcli-archive-keyring.gpg \
+  && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# Install gh CLI (separate layer — needs ca-certificates for HTTPS)
+RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg -o /usr/share/keyrings/githubcli-archive-keyring.gpg \
   && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" > /etc/apt/sources.list.d/github-cli.list \
   && apt-get update && apt-get install -y --no-install-recommends gh \
   && apt-get clean && rm -rf /var/lib/apt/lists/*
