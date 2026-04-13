@@ -128,14 +128,14 @@ See `settings.json.example` for recommended settings:
 
 ### Status line
 
-A `statusline.sh` script is included that shows context remaining, cost tracking, tokens/minute, and session time. To use it:
+A `statusline.sh` script is included that shows context usage, auth token expiry, rate limit usage (5-hour window), and token throughput. To use it:
 
 ```bash
 cp statusline.sh ~/.claude/statusline.sh
 chmod +x ~/.claude/statusline.sh
 ```
 
-Then add the `statusLine` block to your `~/.claude/settings.json` (see above). Requires `jq` for full functionality. Optionally install [ccusage](https://github.com/ryoppippi/ccusage) for session time tracking.
+Then add the `statusLine` block to your `~/.claude/settings.json` (see above). Requires `jq` for full functionality. Rate limit data comes from Claude Code's native `rate_limits` field (v2.1.80+) — no external tools needed.
 
 ## How it works
 
@@ -155,16 +155,18 @@ run-claude.sh
 
 ### Security
 
-- **Network firewall**: Only Anthropic API, GitHub, and SSH traffic allowed. Everything else is rejected at the iptables level. Add more domains via `EXTRA_ALLOWED_DOMAINS`.
+- **Network firewall**: Only Anthropic API, GitHub, plugin marketplace (downloads.claude.ai), and SSH traffic allowed. Everything else is rejected at the iptables level. Add more domains via `EXTRA_ALLOWED_DOMAINS`.
 - **Non-root execution**: Claude Code runs as an unprivileged `claude` user. Entrypoint runs as root only for firewall setup, then drops privileges.
 - **No suid/sgid**: All suid/sgid bits stripped after firewall setup.
 - **Shared state**: `~/.claude` is mounted read-write so the container behaves as your host's Claude identity. SSH keys are mounted read-only.
 
 ## Requirements
 
-- Docker
-- macOS or Linux host
+- Docker Desktop
+- **macOS** (currently the only tested/supported host)
 - Claude Code account (OAuth login on host, or API key)
+
+> **Note:** This project is built and tested on macOS. The default auth method (`keychain`) uses macOS Keychain, `gh` tokens are extracted via macOS keychain, and the timezone sync relies on macOS paths. Linux host support is possible with the `file` or `api-key` auth methods and manual `GH_TOKEN` setup, but is untested.
 
 ## License
 
