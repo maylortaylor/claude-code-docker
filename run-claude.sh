@@ -176,6 +176,12 @@ if [ -n "$CREDS_FILE" ]; then
   CRED_ARGS+=(-v "$CREDS_FILE:/mnt/host-credentials.json:ro")
 fi
 
+# Mount gh CLI config so `gh` commands work inside the container
+GH_ARGS=()
+if [ -d "$HOME/.config/gh" ]; then
+  GH_ARGS+=(-v "$HOME/.config/gh:/home/claude/.config/gh:ro")
+fi
+
 # ── Container name ───────────────────────────────────────────────
 CONTAINER_NAME="claude-${SESSION_NAME}"
 
@@ -204,6 +210,7 @@ docker run -d \
   "${SSH_ARGS[@]+"${SSH_ARGS[@]}"}" \
   "${CLAUDE_STATE_ARGS[@]+"${CLAUDE_STATE_ARGS[@]}"}" \
   "${CRED_ARGS[@]+"${CRED_ARGS[@]}"}" \
+  "${GH_ARGS[@]+"${GH_ARGS[@]}"}" \
   -v "$WORKSPACE_DIR:/workspace" \
   "$IMAGE_NAME"
 
