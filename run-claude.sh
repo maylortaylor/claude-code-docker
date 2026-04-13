@@ -176,10 +176,13 @@ if [ -n "$CREDS_FILE" ]; then
   CRED_ARGS+=(-v "$CREDS_FILE:/mnt/host-credentials.json:ro")
 fi
 
-# Mount gh CLI config so `gh` commands work inside the container
+# Extract gh token from keyring and pass as env var (file has no token on macOS)
 GH_ARGS=()
-if [ -d "$HOME/.config/gh" ]; then
-  GH_ARGS+=(-v "$HOME/.config/gh:/home/claude/.config/gh:ro")
+if command -v gh &>/dev/null; then
+  GH_TOKEN=$(gh auth token 2>/dev/null)
+  if [ -n "$GH_TOKEN" ]; then
+    GH_ARGS+=(-e "GH_TOKEN=$GH_TOKEN")
+  fi
 fi
 
 # ── Container name ───────────────────────────────────────────────
