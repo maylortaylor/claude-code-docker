@@ -35,6 +35,13 @@ RUN useradd -m -s /bin/bash claude && \
 ENV DEVCONTAINER=true
 RUN npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION} ccusage
 
+# Install kubectl
+RUN KUBECTL_ARCH=$(dpkg --print-architecture) && \
+  KUBECTL_VERSION=$(curl -fsSL "https://dl.k8s.io/release/stable.txt") && \
+  curl -fsSL "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/${KUBECTL_ARCH}/kubectl" \
+  -o /usr/local/bin/kubectl && \
+  chmod +x /usr/local/bin/kubectl
+
 # Copy firewall + entrypoint scripts (root-owned, not writable by claude)
 COPY init-firewall.sh /usr/local/bin/
 COPY entrypoint.sh /usr/local/bin/
