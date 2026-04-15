@@ -7,6 +7,7 @@
 #   ./run-claude.sh my-project                       # named session, mounts $PWD
 #   ./run-claude.sh my-project --work-dir ~/repo     # override workspace
 #   ./run-claude.sh my-project --model opus          # pass args to claude
+#   ./run-claude.sh my-project --image ghcr.io/...   # override docker image
 #   ./run-claude.sh list                             # show running sessions
 #   ./run-claude.sh stop my-project                  # stop a session
 #   ./run-claude.sh stop-all                         # stop all sessions
@@ -44,6 +45,10 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --work-dir)
       WORKSPACE_OVERRIDE="$(cd "$2" && pwd)"
+      shift 2
+      ;;
+    --image)
+      IMAGE_NAME="$2"
       shift 2
       ;;
     *)
