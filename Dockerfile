@@ -1,7 +1,5 @@
 FROM node:22-slim
 
-ARG CLAUDE_CODE_VERSION=latest
-
 # Install tools Claude Code needs + firewall deps + PDF generation
 RUN apt-get update && apt-get install -y --no-install-recommends \
   ca-certificates \
@@ -31,9 +29,17 @@ RUN useradd -m -s /bin/bash claude && \
   mkdir -p /home/claude/.claude /workspace && \
   chown -R claude:claude /home/claude /workspace
 
-# Install Claude Code + ccusage via npm
+# ccusage (usage tracker) still ships via npm
 ENV DEVCONTAINER=true
-RUN npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION} ccusage
+RUN npm install -g ccusage
+
+# Claude Code via native installer (npm package deprecated). Installs to
+# /home/claude/.local/bin/claude and self-updates from claude.ai at runtime —
+# both domains are allowlisted in init-firewall.sh.
+# CACHEBUST forces a fresh download: `docker build --build-arg CACHEBUST=$(date +%s) ...`
+ARG CACHEBUST=1
+ENV PATH=/home/claude/.local/bin:$PATH
+RUN su - claude -c "curl -fsSL https://claude.ai/install.sh | bash"
 
 # Install kubectl
 RUN KUBECTL_ARCH=$(dpkg --print-architecture) && \

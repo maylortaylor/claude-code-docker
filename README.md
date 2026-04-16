@@ -101,6 +101,20 @@ cp claude-docker.conf.example claude-docker.conf
 
 ---
 
+### Pre-built images
+
+Pre-built multi-arch images (amd64 + arm64) are published to GitHub Container Registry:
+
+```bash
+# Use the pre-built image instead of building locally
+./run-claude.sh --image ghcr.io/cdowin/claude-code-docker
+
+# Or set it as default in claude-docker.conf
+IMAGE_NAME="ghcr.io/cdowin/claude-code-docker"
+```
+
+When `IMAGE_NAME` points to a registry (contains `/`), the script pulls instead of building locally.
+
 ## Usage
 
 ```bash
@@ -112,6 +126,9 @@ cp claude-docker.conf.example claude-docker.conf
 
 # Override workspace directory
 ./run-claude.sh my-project --work-dir ~/other/repo
+
+# Use a different Docker image (e.g. a derived image with extra tools)
+./run-claude.sh my-project --image ghcr.io/cdowin/claude-code-godot-docker
 
 # Pass args to claude
 ./run-claude.sh my-project --model opus
@@ -268,6 +285,7 @@ run-claude.sh
 ├── Resolves auth (keychain / auth-token / file / api-key)
 ├── Resolves SSH (key-file / agent / none)
 ├── Detects and stages credential files
+├── Builds image (Dockerfile) or pulls from registry
 ├── If container already running → docker exec (attach)
 ├── If container stopped → docker rm, then docker run (detached)
 │   └── entrypoint.sh (runs as root)
@@ -299,6 +317,17 @@ run-claude.sh
 **Bottom line:** The container is firewalled and unprivileged. Claude can read/write your filesystem broadly (that's the point), but it can't exfiltrate data to arbitrary hosts.
 
 ---
+
+## Derived images
+
+This image is designed to be extended. Create a child Dockerfile for project-specific tooling:
+
+```dockerfile
+FROM ghcr.io/cdowin/claude-code-docker:latest
+RUN apt-get update && apt-get install -y your-tools
+```
+
+Then use `--image` to run it, or set `IMAGE_NAME` in your conf. See [claude-code-godot-docker](https://github.com/cdowin/claude-code-godot-docker) for an example that adds Godot game engine support.
 
 ## Requirements
 

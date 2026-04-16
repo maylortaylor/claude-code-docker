@@ -7,6 +7,7 @@
 #   ./run-claude.sh my-project                       # named session, mounts $PWD
 #   ./run-claude.sh my-project --work-dir ~/repo     # override workspace
 #   ./run-claude.sh my-project --model opus          # pass args to claude
+#   ./run-claude.sh my-project --image ghcr.io/...   # override docker image
 #   ./run-claude.sh list                             # show running sessions
 #   ./run-claude.sh stop my-project                  # stop a session
 #   ./run-claude.sh stop-all                         # stop all sessions
@@ -44,6 +45,10 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --work-dir)
       WORKSPACE_OVERRIDE="$(cd "$2" && pwd)"
+      shift 2
+      ;;
+    --image)
+      IMAGE_NAME="$2"
       shift 2
       ;;
     *)
@@ -264,8 +269,12 @@ if [ "${MOUNT_MAC_HOME:-false}" = "true" ] && [ -n "$HOME" ]; then
   fi
 fi
 
-# ── Build ────────────────────────────────────────────────────────
-docker build -t "$IMAGE_NAME" -f "$SCRIPT_DIR/Dockerfile" "$SCRIPT_DIR"
+# ── Build or Pull ────────────────────────────────────────────────
+if [[ "$IMAGE_NAME" == */* ]]; then
+  docker pull "$IMAGE_NAME"
+else
+  docker build -t "$IMAGE_NAME" -f "$SCRIPT_DIR/Dockerfile" "$SCRIPT_DIR"
+fi
 
 # ── Claude state mount ──────────────────────────────────────────
 # Mount the entire ~/.claude directory so all state carries over:
