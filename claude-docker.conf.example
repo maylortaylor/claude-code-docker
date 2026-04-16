@@ -48,8 +48,20 @@ SSH_KEY_PATH="$HOME/.ssh/id_ed25519"
 
 # ── Optional ─────────────────────────────────────────────────────
 # Extra domains to allowlist in the firewall (space-separated).
-# GitHub and Anthropic services are always allowed.
-# EXTRA_ALLOWED_DOMAINS="gitlab.com bitbucket.org"
+# GitHub, GitLab, Anthropic, Atlassian auth, and AWS STS are always allowed.
+# Add your specific Atlassian instance here (e.g. yourco.atlassian.net):
+# EXTRA_ALLOWED_DOMAINS="yourco.atlassian.net bitbucket.org"
 
 # Docker image name (change if you run multiple configs)
 # IMAGE_NAME="claude-code"
+
+# ── Additional credentials (auto-detected from $HOME, all optional) ──
+# The following files/dirs are mounted automatically if they exist on the host:
+#
+#   ~/.gitlab-creds       → /home/claude/.gitlab-creds  (600)
+#   ~/.config/glab-cli/   → /home/claude/.config/glab-cli/
+#   ~/.aws/               → /home/claude/.aws/  (credentials/config set to 600)
+#   ~/.config/gh/         → /home/claude/.config/gh/
+#
+# No configuration needed here — detection is automatic.
+# To skip a specific mount, remove or rename the file/dir on the host.

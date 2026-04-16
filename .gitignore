@@ -1,1 +1,4 @@
+# Personal conf files — contain paths, tokens, or company-specific settings.
+# Use claude-docker.conf.example as a template.
 claude-docker.conf
+claude-docker-*.conf

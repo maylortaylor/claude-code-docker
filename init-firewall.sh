@@ -53,6 +53,9 @@ DOMAINS="
   downloads.claude.ai storage.googleapis.com cdn.growthbook.io
   github.com api.github.com raw.githubusercontent.com objects.githubusercontent.com codeload.github.com
   registry.npmjs.org pypi.org files.pythonhosted.org
+  gitlab.com api.gitlab.com
+  auth.atlassian.com id.atlassian.com api.atlassian.com mcp.atlassian.com
+  sts.amazonaws.com
 "
 if [ -n "${EXTRA_ALLOWED_DOMAINS:-}" ]; then
     DOMAINS="$DOMAINS $EXTRA_ALLOWED_DOMAINS"

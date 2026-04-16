@@ -2,7 +2,7 @@
   "alwaysThinkingEnabled": true,
   "statusLine": {
     "type": "command",
-    "command": "~/.claude/statusline.sh",
+    "command": "/Users/yourname/Documents/_dev/misc/claude-code-docker/statusline.sh",
     "padding": 0
   },
   "env": {

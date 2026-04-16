@@ -294,12 +294,49 @@ if [ "$HAS_JQ" -eq 1 ]; then
 fi
 
 
-# ---- render statusline ----
-# Line 1: Core info (directory, git, model, claude code version, output style)
-printf '📁 %s%s%s' "$(dir_color)" "$current_dir" "$(rst)"
+# ---- extended git info ----
+git_ahead=""
+git_behind=""
+git_staged=0
+git_modified=0
+git_untracked=0
 if [ -n "$git_branch" ]; then
-  printf '  🌿 %s%s%s' "$(git_color)" "$git_branch" "$(rst)"
+  # Ahead/behind remote
+  upstream=$(git rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null)
+  if [ -n "$upstream" ]; then
+    git_ahead=$(git rev-list --count "${upstream}..HEAD" 2>/dev/null)
+    git_behind=$(git rev-list --count "HEAD..${upstream}" 2>/dev/null)
+  fi
+  # Working tree status counts
+  while IFS= read -r line; do
+    xy="${line:0:2}"
+    x="${xy:0:1}"
+    y="${xy:1:1}"
+    [ "$x" = "?" ] && (( git_untracked++ )) && continue
+    [ "$x" != " " ] && [ "$x" != "?" ] && (( git_staged++ ))
+    [ "$y" != " " ] && [ "$y" != "?" ] && (( git_modified++ ))
+  done < <(git status --porcelain 2>/dev/null)
 fi
+
+# ---- profile badge ----
+profile_color() { if [ "$use_color" -eq 1 ]; then printf '\033[1;38;5;255m'; fi; }  # bold white
+
+# ---- render statusline ----
+# Line 1: Profile badge (if set) + directory + model + version + style
+if [ -n "${CLAUDE_PROFILE:-}" ]; then
+  case "${CLAUDE_PROFILE^^}" in
+    PSD*)      badge_bg='\033[48;5;22m';  badge_label=" PSD " ;;       # dark forest green bg
+    PERSONAL*) badge_bg='\033[48;5;91m';  badge_label=" Personal " ;;  # purple bg
+    *)         badge_bg='\033[48;5;236m'; badge_label=" ${CLAUDE_PROFILE} " ;;
+  esac
+  if [ "$use_color" -eq 1 ]; then
+    printf '%b\033[1;38;5;255m%s\033[0m' "$badge_bg" "$badge_label"
+  else
+    printf '[%s]' "$CLAUDE_PROFILE"
+  fi
+  printf '  '
+fi
+printf '📁 %s%s%s' "$(dir_color)" "$current_dir" "$(rst)"
 printf '  🤖 %s%s%s' "$(model_color)" "$model_name" "$(rst)"
 if [ -n "$model_version" ] && [ "$model_version" != "null" ]; then
   printf '  🏷️ %s%s%s' "$(version_color)" "$model_version" "$(rst)"
@@ -311,41 +348,111 @@ if [ -n "$output_style" ] && [ "$output_style" != "null" ]; then
   printf '  🎨 %s%s%s' "$(style_color)" "$output_style" "$(rst)"
 fi
 
-# Line 2: Context + auth token
-line2=""
-if [ -n "$context_pct" ]; then
-  context_bar=$(progress_bar "$context_used_pct" 10)
-  line2="🧠 $(context_color)Context Used: ${context_pct} [${context_bar}]$(rst)"
-else
-  line2="🧠 $(context_color)Context Used: TBD$(rst)"
-fi
-if [ -n "$token_txt" ]; then
-  line2="$line2  🔑 $(token_color)${token_txt}$(rst)"
+# Line 2: Git info
+if [ -n "$git_branch" ]; then
+  printf '\n🌿 %s%s%s' "$(git_color)" "$git_branch" "$(rst)"
+  # Ahead/behind
+  if [ -n "$git_ahead" ] && [ -n "$git_behind" ]; then
+    [ "$git_ahead" -gt 0 ] && printf '  %s↑%s%s' "$(git_color)" "$git_ahead" "$(rst)"
+    [ "$git_behind" -gt 0 ] && printf '  %s↓%s%s' "$(git_color)" "$git_behind" "$(rst)"
+  fi
+  # Staged / modified / untracked
+  [ "$git_staged" -gt 0 ]   && printf '  %s●%s staged:%s%s' "$(git_color)" "$(rst)" "$git_staged" "$(rst)"
+  [ "$git_modified" -gt 0 ] && printf '  %s~%s modified:%s%s' "$(git_color)" "$(rst)" "$git_modified" "$(rst)"
+  [ "$git_untracked" -gt 0 ] && printf '  %s?%s untracked:%s%s' "$(git_color)" "$(rst)" "$git_untracked" "$(rst)"
 fi
 
-# Line 3: Token usage + session reset
+# Line 3: Context + auth token
 line3=""
+if [ -n "$context_pct" ]; then
+  context_bar=$(progress_bar "$context_used_pct" 10)
+  line3="🧠 $(context_color)Context Used: ${context_pct} [${context_bar}]$(rst)"
+else
+  line3="🧠 $(context_color)Context Used: TBD$(rst)"
+fi
+if [ -n "$token_txt" ]; then
+  line3="$line3  🔑 $(token_color)${token_txt}$(rst)"
+fi
+
+# Line 4: Token usage + cost + session reset
+line4=""
 if [ -n "$tot_tokens" ] && [[ "$tot_tokens" =~ ^[0-9]+$ ]]; then
   if [ -n "$tpm" ] && [[ "$tpm" =~ ^[0-9.]+$ ]]; then
     tpm_formatted=$(printf '%.0f' "$tpm")
-    line3="📊 $(usage_color)${tot_tokens} tok (${tpm_formatted} tpm)$(rst)"
+    line4="📊 $(usage_color)${tot_tokens} tok (${tpm_formatted} tpm)$(rst)"
   else
-    line3="📊 $(usage_color)${tot_tokens} tok$(rst)"
+    line4="📊 $(usage_color)${tot_tokens} tok$(rst)"
   fi
 fi
-if [ -n "$session_txt" ]; then
-  if [ -n "$line3" ]; then
-    line3="$line3  ⌛ $(session_color)${session_txt}$(rst)"
+
+# Cost display
+cost_txt=""
+if [ -n "$cost_usd" ] && [[ "$cost_usd" =~ ^[0-9.]+$ ]]; then
+  cost_fmt=$(printf '$%.4f' "$cost_usd")
+  if [ -n "$cost_per_hour" ] && [[ "$cost_per_hour" =~ ^[0-9.]+$ ]]; then
+    cph_fmt=$(printf '$%.2f/hr' "$cost_per_hour")
+    cost_txt="$(cost_color)${cost_fmt} · ${cph_fmt}$(rst)"
   else
-    line3="⌛ $(session_color)${session_txt}$(rst)"
+    cost_txt="$(cost_color)${cost_fmt}$(rst)"
+  fi
+fi
+if [ -n "$cost_txt" ]; then
+  if [ -n "$line4" ]; then
+    line4="$line4  💰 ${cost_txt}"
+  else
+    line4="💰 ${cost_txt}"
+  fi
+fi
+
+# Session limit line (personal profile only — set SHOW_SESSION_LIMIT=1 in settings.json env)
+line_session=""
+if [ "${SHOW_SESSION_LIMIT:-0}" = "1" ] && [ -n "$five_hr_pct" ]; then
+  sl_pct=$(printf '%.0f' "$five_hr_pct")
+  sl_bar=$(progress_bar "$sl_pct" 12)
+
+  # Color: green → yellow → orange → red
+  sl_color() {
+    if   (( sl_pct >= 90 )); then printf '\033[38;5;203m'  # red
+    elif (( sl_pct >= 70 )); then printf '\033[38;5;215m'  # orange
+    elif (( sl_pct >= 40 )); then printf '\033[38;5;228m'  # yellow
+    else                          printf '\033[38;5;158m'; fi  # green
+  }
+  if [ "$use_color" -ne 1 ]; then sl_color() { :; }; fi
+
+  sl_txt="$(sl_color)${sl_pct}% [${sl_bar}]$(rst)"
+
+  if [ -n "$five_hr_reset" ]; then
+    now_sec=$(date +%s)
+    remaining=$(( five_hr_reset - now_sec )); (( remaining < 0 )) && remaining=0
+    rh=$(( remaining / 3600 )); rm=$(( (remaining % 3600) / 60 ))
+    end_hm=$(fmt_time_hm "$five_hr_reset")
+    sl_txt="$sl_txt  $(sl_color)${rh}h ${rm}m left · resets ${end_hm}$(rst)"
+  fi
+
+  # Also show 7-day if available
+  if [ -n "${weekly_pct:-}" ]; then
+    wk_bar=$(progress_bar "$weekly_pct" 8)
+    sl_txt="$sl_txt  $(sl_color)7d: ${weekly_pct}% [${wk_bar}]$(rst)"
+  fi
+
+  line_session="⏱ Session: ${sl_txt}"
+elif [ -n "$session_txt" ]; then
+  # Fallback: append to line4 when SHOW_SESSION_LIMIT is not set
+  if [ -n "$line4" ]; then
+    line4="$line4  ⌛ $(session_color)${session_txt}$(rst)"
+  else
+    line4="⌛ $(session_color)${session_txt}$(rst)"
   fi
 fi
 
 # Print lines
-if [ -n "$line2" ]; then
-  printf '\n%s' "$line2"
-fi
 if [ -n "$line3" ]; then
   printf '\n%s' "$line3"
+fi
+if [ -n "$line4" ]; then
+  printf '\n%s' "$line4"
+fi
+if [ -n "$line_session" ]; then
+  printf '\n%s' "$line_session"
 fi
 printf '\n'

@@ -54,7 +54,7 @@ while [ $# -gt 0 ]; do
 done
 set -- "${CLAUDE_ARGS[@]+"${CLAUDE_ARGS[@]}"}"
 
-CONF="$SCRIPT_DIR/claude-docker.conf"
+CONF="${CLAUDE_DOCKER_CONF:-$SCRIPT_DIR/claude-docker.conf}"
 if [ -f "$CONF" ]; then
   source "$CONF"
 fi
@@ -63,7 +63,7 @@ fi
 IMAGE_NAME="${IMAGE_NAME:-claude-code}"
 AUTH_METHOD="${AUTH_METHOD:-keychain}"
 SSH_METHOD="${SSH_METHOD:-key-file}"
-CLAUDE_DIR="$HOME/.claude"
+CLAUDE_DIR="${CLAUDE_STATE_DIR:-$HOME/.claude}"
 
 # ── Resolve workspace: override > conf > $PWD ────────────────────
 if [ -n "$WORKSPACE_OVERRIDE" ]; then
@@ -109,6 +109,10 @@ case "$AUTH_METHOD" in
   api-key)
     ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:?Set ANTHROPIC_API_KEY in claude-docker.conf}"
     EXTRA_ENV+=(-e "ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY")
+    ;;
+  auth-token)
+    # Auth handled entirely via ANTHROPIC_AUTH_TOKEN + ANTHROPIC_BASE_URL env vars.
+    # Both are forwarded in the env-var block above — nothing to mount here.
     ;;
   *)
     echo "ERROR: Unknown AUTH_METHOD '$AUTH_METHOD'. Use: keychain, file, or api-key."
@@ -157,6 +161,107 @@ esac
 # ── Pass extra allowed domains to firewall ───────────────────────
 if [ -n "${EXTRA_ALLOWED_DOMAINS:-}" ]; then
   EXTRA_ENV+=(-e "EXTRA_ALLOWED_DOMAINS=$EXTRA_ALLOWED_DOMAINS")
+fi
+
+# ── Additional credential mounts ──────────────────────────────────
+# Each is staged under /mnt/ read-only; entrypoint.sh copies them to
+# the correct home-directory location and fixes ownership/permissions.
+ADDITIONAL_CRED_ARGS=()
+
+# GitLab credentials file (~/.gitlab-creds)
+if [ -f "$HOME/.gitlab-creds" ]; then
+  ADDITIONAL_CRED_ARGS+=(-v "$HOME/.gitlab-creds:/mnt/gitlab-creds:ro")
+fi
+
+# glab CLI config (~/.config/glab-cli/)
+if [ -d "$HOME/.config/glab-cli" ]; then
+  ADDITIONAL_CRED_ARGS+=(-v "$HOME/.config/glab-cli:/mnt/host-glab-config:ro")
+fi
+
+# AWS credentials (~/.aws/)
+if [ -d "$HOME/.aws" ]; then
+  ADDITIONAL_CRED_ARGS+=(-v "$HOME/.aws:/mnt/host-aws:ro")
+fi
+
+# GitHub CLI full config (~/.config/gh/)
+# GH_TOKEN env var above handles basic auth; this adds the full gh config
+# so commands like `gh api` and `gh pr` work without re-authenticating.
+if [ -d "$HOME/.config/gh" ]; then
+  ADDITIONAL_CRED_ARGS+=(-v "$HOME/.config/gh:/mnt/host-gh-config:ro")
+fi
+
+# NPM credentials (~/.npmrc)
+if [ -f "$HOME/.npmrc" ]; then
+  ADDITIONAL_CRED_ARGS+=(-v "$HOME/.npmrc:/mnt/host-npmrc:ro")
+fi
+
+# Kubernetes config (~/.kube/)
+if [ -d "$HOME/.kube" ]; then
+  ADDITIONAL_CRED_ARGS+=(-v "$HOME/.kube:/mnt/host-kube:ro")
+fi
+
+# Atlassian CLI config (~/.config/atlassian/) — covers `atlas` CLI
+if [ -d "$HOME/.config/atlassian" ]; then
+  ADDITIONAL_CRED_ARGS+=(-v "$HOME/.config/atlassian:/mnt/host-atlassian:ro")
+fi
+
+# Jira CLI config (~/.config/jira/) — covers go-jira and similar
+if [ -d "$HOME/.config/jira" ]; then
+  ADDITIONAL_CRED_ARGS+=(-v "$HOME/.config/jira:/mnt/host-jira-config:ro")
+fi
+
+# Atlassian creds file (~/.atlassian-creds) — sets ATLASSIAN_EMAIL and ATLASSIAN_API_TOKEN
+if [ -f "$HOME/.atlassian-creds" ]; then
+  ADDITIONAL_CRED_ARGS+=(-v "$HOME/.atlassian-creds:/mnt/host-atlassian-creds:ro")
+fi
+
+# Atlassian API token — forward from host shell if set
+if [ -n "${ATLASSIAN_API_TOKEN:-}" ]; then
+  EXTRA_ENV+=(-e "ATLASSIAN_API_TOKEN=$ATLASSIAN_API_TOKEN")
+fi
+
+# ── Forward GitLab credentials from host shell ───────────────────
+[ -n "${GITLAB_ACCESS_TOKEN:-}" ] && EXTRA_ENV+=(-e "GITLAB_ACCESS_TOKEN=$GITLAB_ACCESS_TOKEN")
+[ -n "${GITLAB_USERNAME:-}" ]     && EXTRA_ENV+=(-e "GITLAB_USERNAME=$GITLAB_USERNAME")
+[ -n "${GITLAB_URL:-}" ]          && EXTRA_ENV+=(-e "GITLAB_URL=$GITLAB_URL")
+
+# ── Forward Atlassian credentials from host shell ────────────────
+[ -n "${ATLASSIAN_EMAIL:-}" ]     && EXTRA_ENV+=(-e "ATLASSIAN_EMAIL=$ATLASSIAN_EMAIL")
+[ -n "${ATLASSIAN_API_TOKEN:-}" ] && EXTRA_ENV+=(-e "ATLASSIAN_API_TOKEN=$ATLASSIAN_API_TOKEN")
+
+# ── Forward Anthropic proxy vars (PSD / custom-endpoint setups) ──
+# These are set by claude-psd() in .zshrc-claude-psd and must reach the container.
+[ -n "${ANTHROPIC_AUTH_TOKEN:-}" ]           && EXTRA_ENV+=(-e "ANTHROPIC_AUTH_TOKEN=$ANTHROPIC_AUTH_TOKEN")
+[ -n "${ANTHROPIC_BASE_URL:-}" ]             && EXTRA_ENV+=(-e "ANTHROPIC_BASE_URL=$ANTHROPIC_BASE_URL")
+[ -n "${ANTHROPIC_DEFAULT_OPUS_MODEL:-}" ]   && EXTRA_ENV+=(-e "ANTHROPIC_DEFAULT_OPUS_MODEL=$ANTHROPIC_DEFAULT_OPUS_MODEL")
+[ -n "${ANTHROPIC_DEFAULT_SONNET_MODEL:-}" ] && EXTRA_ENV+=(-e "ANTHROPIC_DEFAULT_SONNET_MODEL=$ANTHROPIC_DEFAULT_SONNET_MODEL")
+[ -n "${ANTHROPIC_DEFAULT_HAIKU_MODEL:-}" ]  && EXTRA_ENV+=(-e "ANTHROPIC_DEFAULT_HAIKU_MODEL=$ANTHROPIC_DEFAULT_HAIKU_MODEL")
+
+# ── Mount full _dev tree for cross-project access ────────────────
+# Mounts $DEV_ROOT at /_dev (read-only) so Claude can navigate the
+# full _dev tree even when /workspace is a specific project subdir.
+DEV_ROOT_ARGS=()
+if [ -n "${DEV_ROOT:-}" ] && [ -d "$DEV_ROOT" ]; then
+  REAL_DEV_ROOT=$(cd "$DEV_ROOT" && pwd)
+  DEV_ROOT_ARGS+=(-e "HOST_DEV_PATH=$DEV_ROOT")
+  # Always mount at /_dev — even when workspace IS the dev root.
+  # entrypoint.sh symlinks the macOS absolute path → /_dev so that
+  # hardcoded paths like /Users/yourname/Documents/_dev/... resolve inside the container.
+  DEV_ROOT_ARGS+=(-v "$REAL_DEV_ROOT:/_dev")
+fi
+
+# ── Mount Mac home directory ──────────────────────────────────────
+# Mounts $HOME at its real Mac path inside the container so dotfiles
+# like ~/.zshrc, ~/.ssh/config, etc. are accessible by Claude.
+# Controlled by MOUNT_MAC_HOME=true in your .conf file.
+# Set MOUNT_MAC_HOME_RO=true to mount read-only (default is read-write).
+MAC_HOME_ARGS=()
+if [ "${MOUNT_MAC_HOME:-false}" = "true" ] && [ -n "$HOME" ]; then
+  if [ "${MOUNT_MAC_HOME_RO:-false}" = "true" ]; then
+    MAC_HOME_ARGS+=(-v "$HOME:$HOME:ro")
+  else
+    MAC_HOME_ARGS+=(-v "$HOME:$HOME")
+  fi
 fi
 
 # ── Build ────────────────────────────────────────────────────────
@@ -214,6 +319,9 @@ docker run -d \
   "${CLAUDE_STATE_ARGS[@]+"${CLAUDE_STATE_ARGS[@]}"}" \
   "${CRED_ARGS[@]+"${CRED_ARGS[@]}"}" \
   "${GH_ARGS[@]+"${GH_ARGS[@]}"}" \
+  "${ADDITIONAL_CRED_ARGS[@]+"${ADDITIONAL_CRED_ARGS[@]}"}" \
+  "${DEV_ROOT_ARGS[@]+"${DEV_ROOT_ARGS[@]}"}" \
+  "${MAC_HOME_ARGS[@]+"${MAC_HOME_ARGS[@]}"}" \
   -v "$WORKSPACE_DIR:/workspace" \
   "$IMAGE_NAME"
 
