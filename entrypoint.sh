@@ -126,39 +126,53 @@ echo '{"hasCompletedOnboarding":true,"installMethod":"native"}' > /home/claude/.
 ln -sf /home/claude/.claude/.claude.json /home/claude/.claude.json
 chown claude:claude /home/claude/.claude/.claude.json /home/claude/.claude.json
 
-# Set up SSH based on method passed via environment
-SSH_METHOD="${SSH_METHOD:-none}"
-if [ "$SSH_METHOD" != "none" ]; then
-  echo "Configuring SSH ($SSH_METHOD)..."
-  mkdir -p /home/claude/.ssh
+# Pre-populate GitHub host key so /plugin and git clones work without strict-checking failures
+mkdir -p /home/claude/.ssh
+chmod 700 /home/claude/.ssh
+ssh-keyscan -t ed25519,rsa,ecdsa github.com >> /home/claude/.ssh/known_hosts 2>/dev/null || true
+chmod 600 /home/claude/.ssh/known_hosts
+chown claude:claude /home/claude/.ssh /home/claude/.ssh/known_hosts
 
-  case "$SSH_METHOD" in
-    key-file)
-      # Copy the read-only mounted key so we can set ownership and permissions
-      cp /home/claude/.ssh/user_key /home/claude/.ssh/id_key
-      chmod 600 /home/claude/.ssh/id_key
-      cat > /home/claude/.ssh/config <<'SSHEOF'
+# Set up SSH config based on method passed via environment
+SSH_METHOD="${SSH_METHOD:-none}"
+case "$SSH_METHOD" in
+  key-file)
+    echo "Configuring SSH ($SSH_METHOD)..."
+    # Copy the read-only mounted key so we can set ownership and permissions
+    cp /home/claude/.ssh/user_key /home/claude/.ssh/id_key
+    chmod 600 /home/claude/.ssh/id_key
+    cat > /home/claude/.ssh/config <<'SSHEOF'
 Host *
     User git
     IdentityFile /home/claude/.ssh/id_key
     StrictHostKeyChecking accept-new
 SSHEOF
-      ;;
-    agent)
-      cat > /home/claude/.ssh/config <<'SSHEOF'
+    chmod 600 /home/claude/.ssh/config
+    chown claude:claude /home/claude/.ssh/config /home/claude/.ssh/id_key
+    ;;
+  agent)
+    echo "Configuring SSH ($SSH_METHOD)..."
+    cat > /home/claude/.ssh/config <<'SSHEOF'
 Host *
     User git
     StrictHostKeyChecking accept-new
 SSHEOF
-      ;;
-  esac
+    chmod 600 /home/claude/.ssh/config
+    chown claude:claude /home/claude/.ssh/config
+    ;;
+  none)
+    cat > /home/claude/.ssh/config <<'SSHEOF'
+Host *
+    StrictHostKeyChecking accept-new
+SSHEOF
+    chmod 600 /home/claude/.ssh/config
+    chown claude:claude /home/claude/.ssh/config
+    ;;
+esac
 
-  chmod 700 /home/claude/.ssh
-  chmod 600 /home/claude/.ssh/config
-  # chown only the files we own — skip read-only mounted user_key
-  chown claude:claude /home/claude/.ssh /home/claude/.ssh/config
-  [ -f /home/claude/.ssh/id_key ] && chown claude:claude /home/claude/.ssh/id_key
-fi
+# Rewrite git@github.com: SSH URLs to HTTPS so public repos clone without SSH auth
+# This is needed for /plugin which clones public marketplace repos via SSH URLs
+gosu claude git config --global url."https://github.com/".insteadOf "git@github.com:"
 
 # Fix SSH agent socket permissions — Docker mounts it as root:root,
 # but claude user needs read/write access to connect to the agent.
