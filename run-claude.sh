@@ -120,8 +120,38 @@ case "$AUTH_METHOD" in
     [ -n "${ANTHROPIC_DEFAULT_SONNET_MODEL:-}" ] && EXTRA_ENV+=(-e "ANTHROPIC_DEFAULT_SONNET_MODEL=$ANTHROPIC_DEFAULT_SONNET_MODEL")
     [ -n "${ANTHROPIC_DEFAULT_HAIKU_MODEL:-}" ]  && EXTRA_ENV+=(-e "ANTHROPIC_DEFAULT_HAIKU_MODEL=$ANTHROPIC_DEFAULT_HAIKU_MODEL")
     ;;
+  auto)
+    # 1. Try macOS keychain first (OAuth session from `claude login`)
+    if command -v security &>/dev/null; then
+      KEYCHAIN_ACCOUNT="${KEYCHAIN_ACCOUNT:-$(whoami)}"
+      CREDS=$(security find-generic-password -s "Claude Code-credentials" -a "$KEYCHAIN_ACCOUNT" -w 2>/dev/null)
+      if [ -n "$CREDS" ]; then
+        CREDS_FILE=$(mktemp)
+        echo "$CREDS" > "$CREDS_FILE"
+        chmod 600 "$CREDS_FILE"
+        echo "[auth] Using OAuth session from keychain (account: $KEYCHAIN_ACCOUNT)"
+      fi
+    fi
+    # 2. Fall back to ANTHROPIC_AUTH_TOKEN, then ANTHROPIC_API_KEY
+    if [ -z "$CREDS_FILE" ]; then
+      if [ -n "${ANTHROPIC_AUTH_TOKEN:-}" ]; then
+        EXTRA_ENV+=(-e "ANTHROPIC_AUTH_TOKEN=$ANTHROPIC_AUTH_TOKEN")
+        echo "[auth] Using ANTHROPIC_AUTH_TOKEN (API key fallback)"
+      elif [ -n "${ANTHROPIC_API_KEY:-}" ]; then
+        EXTRA_ENV+=(-e "ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY")
+        echo "[auth] Using ANTHROPIC_API_KEY (API key fallback)"
+      else
+        echo "WARN: AUTH_METHOD=auto found no credentials (keychain empty, ANTHROPIC_AUTH_TOKEN and ANTHROPIC_API_KEY unset)."
+      fi
+    fi
+    # Always pass through URL and model overrides
+    [ -n "${ANTHROPIC_BASE_URL:-}" ]             && EXTRA_ENV+=(-e "ANTHROPIC_BASE_URL=$ANTHROPIC_BASE_URL")
+    [ -n "${ANTHROPIC_DEFAULT_OPUS_MODEL:-}" ]   && EXTRA_ENV+=(-e "ANTHROPIC_DEFAULT_OPUS_MODEL=$ANTHROPIC_DEFAULT_OPUS_MODEL")
+    [ -n "${ANTHROPIC_DEFAULT_SONNET_MODEL:-}" ] && EXTRA_ENV+=(-e "ANTHROPIC_DEFAULT_SONNET_MODEL=$ANTHROPIC_DEFAULT_SONNET_MODEL")
+    [ -n "${ANTHROPIC_DEFAULT_HAIKU_MODEL:-}" ]  && EXTRA_ENV+=(-e "ANTHROPIC_DEFAULT_HAIKU_MODEL=$ANTHROPIC_DEFAULT_HAIKU_MODEL")
+    ;;
   *)
-    echo "ERROR: Unknown AUTH_METHOD '$AUTH_METHOD'. Use: keychain, file, or api-key."
+    echo "ERROR: Unknown AUTH_METHOD '$AUTH_METHOD'. Use: keychain, file, api-key, or auto."
     exit 1
     ;;
 esac

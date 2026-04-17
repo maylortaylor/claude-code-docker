@@ -19,12 +19,12 @@ if [ -f /mnt/host-credentials.json ]; then
   chown claude:claude /home/claude/.claude/.credentials.json
 fi
 
-# Prevent auth conflict: if an API key is injected via env, remove any stored
+# Prevent auth conflict: if an API key or auth token is injected via env, remove any stored
 # /login credentials from the mounted state dir — having both causes Claude Code
 # to warn "Auth conflict: both ANTHROPIC_AUTH_TOKEN and /login managed key are set"
 # and refuse to connect.
-if [ -n "${ANTHROPIC_API_KEY:-}" ] && [ -f /home/claude/.claude/.credentials.json ]; then
-  echo "API key present — removing stale /login credentials to prevent auth conflict..."
+if [ -n "${ANTHROPIC_API_KEY:-}${ANTHROPIC_AUTH_TOKEN:-}" ] && [ -f /home/claude/.claude/.credentials.json ]; then
+  echo "Auth token/key present — removing stale /login credentials to prevent auth conflict..."
   rm -f /home/claude/.claude/.credentials.json
 fi
 

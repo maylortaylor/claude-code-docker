@@ -1,6 +1,6 @@
 FROM node:22-slim
 
-ARG CLAUDE_CODE_VERSION=latest
+ARG CLAUDE_CODE_VERSION=2.1.100
 
 # Install tools Claude Code needs + firewall deps + PDF generation
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -25,6 +25,7 @@ RUN useradd -m -s /bin/bash claude && \
   chown -R claude:claude /home/claude /workspace
 
 ENV DEVCONTAINER=true
+ENV CLAUDE_CODE_DISABLE_AUTO_UPDATE=1
 RUN npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}
 
 # Copy firewall + entrypoint scripts (root-owned, not writable by claude)
