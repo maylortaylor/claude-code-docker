@@ -169,6 +169,11 @@ if [ -n "${EXTRA_ALLOWED_DOMAINS:-}" ]; then
   EXTRA_ENV+=(-e "EXTRA_ALLOWED_DOMAINS=$EXTRA_ALLOWED_DOMAINS")
 fi
 
+# ── Open web browsing (OPEN_WEB=true in conf unlocks all HTTP/HTTPS) ─────────
+if [ "${OPEN_WEB:-false}" = "true" ]; then
+  EXTRA_ENV+=(-e "OPEN_WEB=true")
+fi
+
 # ── Build ────────────────────────────────────────────────────────
 docker build -t "$IMAGE_NAME" -f "$SCRIPT_DIR/Dockerfile" "$SCRIPT_DIR"
 

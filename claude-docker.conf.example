@@ -51,5 +51,11 @@ SSH_KEY_PATH="$HOME/.ssh/id_ed25519"
 # GitHub and Anthropic services are always allowed.
 # EXTRA_ALLOWED_DOMAINS="gitlab.com bitbucket.org"
 
+# Open all outbound HTTP/HTTPS traffic so WebFetch can reach any website.
+# Claude API and git still work; only non-web ports stay firewalled.
+# Set to "true" for personal/creative work where you want full web browsing.
+# Leave unset (default: false) for stricter isolation.
+# OPEN_WEB=true
+
 # Docker image name (change if you run multiple configs)
 # IMAGE_NAME="claude-code"

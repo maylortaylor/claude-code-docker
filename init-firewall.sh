@@ -66,7 +66,19 @@ iptables -A OUTPUT -m set --match-set allowed-domains dst -j ACCEPT
 # Allow established connections back in
 iptables -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
 
+# OPEN_WEB mode: allow all outbound HTTP/HTTPS so WebFetch can reach any site.
+# Set OPEN_WEB=true in your .conf file to enable. Everything else stays blocked.
+if [ "${OPEN_WEB:-false}" = "true" ]; then
+    iptables -A OUTPUT -p tcp --dport 443 -j ACCEPT
+    iptables -A OUTPUT -p tcp --dport 80  -j ACCEPT
+    echo "OPEN_WEB=true: all outbound HTTPS/HTTP allowed."
+fi
+
 # Default deny everything else outbound
 iptables -A OUTPUT -j REJECT --reject-with icmp-port-unreachable
 
-echo "Firewall configured. Only Claude API traffic allowed."
+if [ "${OPEN_WEB:-false}" = "true" ]; then
+    echo "Firewall configured. Claude API + open web browsing allowed."
+else
+    echo "Firewall configured. Only Claude API traffic allowed."
+fi
