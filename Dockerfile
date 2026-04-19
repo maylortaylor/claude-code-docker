@@ -1,5 +1,7 @@
 FROM node:22-slim
 
+ARG CLAUDE_CODE_VERSION=2.1.100
+
 # Install tools Claude Code needs + firewall deps + PDF generation
 RUN apt-get update && apt-get install -y --no-install-recommends \
   ca-certificates \
@@ -31,27 +33,14 @@ RUN useradd -m -s /bin/bash claude && \
 
 # ccusage (usage tracker) still ships via npm
 ENV DEVCONTAINER=true
-RUN npm install -g ccusage
-
-# Claude Code via native installer (npm package deprecated). Installs to
-# /home/claude/.local/bin/claude and self-updates from claude.ai at runtime —
-# both domains are allowlisted in init-firewall.sh.
-# CACHEBUST forces a fresh download: `docker build --build-arg CACHEBUST=$(date +%s) ...`
-ARG CACHEBUST=1
-ENV PATH=/home/claude/.local/bin:$PATH
-RUN su - claude -c "curl -fsSL https://claude.ai/install.sh | bash"
-
-# Install kubectl
-RUN KUBECTL_ARCH=$(dpkg --print-architecture) && \
-  KUBECTL_VERSION=$(curl -fsSL "https://dl.k8s.io/release/stable.txt") && \
-  curl -fsSL "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/${KUBECTL_ARCH}/kubectl" \
-  -o /usr/local/bin/kubectl && \
-  chmod +x /usr/local/bin/kubectl
+ENV CLAUDE_CODE_DISABLE_AUTO_UPDATE=1
+RUN npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}
 
 # Copy firewall + entrypoint scripts (root-owned, not writable by claude)
 COPY init-firewall.sh /usr/local/bin/
 COPY entrypoint.sh /usr/local/bin/
-RUN chmod +x /usr/local/bin/init-firewall.sh /usr/local/bin/entrypoint.sh
+COPY link-plugin-skills.sh /usr/local/bin/
+RUN chmod +x /usr/local/bin/init-firewall.sh /usr/local/bin/entrypoint.sh /usr/local/bin/link-plugin-skills.sh
 
 WORKDIR /workspace
 
