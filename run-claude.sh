@@ -7,6 +7,7 @@
 #   ./run-claude.sh my-project                       # named session, mounts $PWD
 #   ./run-claude.sh my-project --work-dir ~/repo     # override workspace
 #   ./run-claude.sh my-project --model opus          # pass args to claude
+#   ./run-claude.sh my-project --image ghcr.io/...   # override docker image
 #   ./run-claude.sh list                             # show running sessions
 #   ./run-claude.sh stop my-project                  # stop a session
 #   ./run-claude.sh stop-all                         # stop all sessions
@@ -44,6 +45,10 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --work-dir)
       WORKSPACE_OVERRIDE="$(cd "$2" && pwd)"
+      shift 2
+      ;;
+    --image)
+      IMAGE_NAME="$2"
       shift 2
       ;;
     *)
@@ -267,11 +272,17 @@ docker run -d \
   --name "$CONTAINER_NAME" \
   --cap-add=NET_ADMIN \
   --cap-add=NET_RAW \
+  -e "HOST_HOME=$HOME" \
+  -e "TZ=$(cat /etc/timezone 2>/dev/null || readlink /etc/localtime 2>/dev/null | sed 's|.*/zoneinfo/||')" \
+  -v /etc/localtime:/etc/localtime:ro \
   "${EXTRA_ENV[@]+"${EXTRA_ENV[@]}"}" \
   "${SSH_ARGS[@]+"${SSH_ARGS[@]}"}" \
   "${CLAUDE_STATE_ARGS[@]+"${CLAUDE_STATE_ARGS[@]}"}" \
   "${CRED_ARGS[@]+"${CRED_ARGS[@]}"}" \
-  "${MAC_FS_ARGS[@]+"${MAC_FS_ARGS[@]}"}" \
+  "${GH_ARGS[@]+"${GH_ARGS[@]}"}" \
+  "${ADDITIONAL_CRED_ARGS[@]+"${ADDITIONAL_CRED_ARGS[@]}"}" \
+  "${DEV_ROOT_ARGS[@]+"${DEV_ROOT_ARGS[@]}"}" \
+  "${MAC_HOME_ARGS[@]+"${MAC_HOME_ARGS[@]}"}" \
   -v "$WORKSPACE_DIR:/workspace" \
   "$IMAGE_NAME"
 

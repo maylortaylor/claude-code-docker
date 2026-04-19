@@ -86,6 +86,13 @@ esac
 # This is needed for /plugin which clones public marketplace repos via SSH URLs
 gosu claude git config --global url."https://github.com/".insteadOf "git@github.com:"
 
+# Fix SSH agent socket permissions — Docker mounts it as root:root,
+# but claude user needs read/write access to connect to the agent.
+if [ "$SSH_METHOD" = "agent" ] && [ -S "/run/ssh-agent.sock" ]; then
+  chown root:claude /run/ssh-agent.sock
+  chmod 660 /run/ssh-agent.sock
+fi
+
 # Signal that setup is complete
 touch /tmp/.claude-ready
 

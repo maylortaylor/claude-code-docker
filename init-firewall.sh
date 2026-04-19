@@ -43,7 +43,20 @@ iptables -A OUTPUT -p tcp --dport 22 -j ACCEPT
 iptables -A INPUT -p tcp --sport 22 -m state --state ESTABLISHED -j ACCEPT
 
 # Allow Claude API + related services (plus any user-specified extras)
-DOMAINS="api.anthropic.com claude.ai platform.claude.com statsig.anthropic.com github.com sentry.io"
+# Core: Claude API, platform, analytics
+# Plugins: downloads.claude.ai (official marketplace CDN), storage.googleapis.com (GCS fallback)
+# GitHub: git operations + API + CDN domains for third-party plugin marketplaces
+# Feature flags: cdn.growthbook.io (controls plugin fallback behavior)
+# Plugin deps: npm registry, PyPI for plugins that install dependencies
+DOMAINS="
+  api.anthropic.com claude.ai platform.claude.com statsig.anthropic.com sentry.io
+  downloads.claude.ai storage.googleapis.com cdn.growthbook.io
+  github.com api.github.com raw.githubusercontent.com objects.githubusercontent.com codeload.github.com
+  registry.npmjs.org pypi.org files.pythonhosted.org
+  gitlab.com api.gitlab.com
+  auth.atlassian.com id.atlassian.com api.atlassian.com mcp.atlassian.com
+  sts.amazonaws.com
+"
 if [ -n "${EXTRA_ALLOWED_DOMAINS:-}" ]; then
     DOMAINS="$DOMAINS $EXTRA_ALLOWED_DOMAINS"
 fi

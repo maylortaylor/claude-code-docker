@@ -172,11 +172,10 @@ fi
 usage_color() { if [ "$use_color" -eq 1 ]; then printf '\033[38;5;189m'; fi; }  # lavender
 cost_color() { if [ "$use_color" -eq 1 ]; then printf '\033[38;5;222m'; fi; }   # light gold
 burn_color() { if [ "$use_color" -eq 1 ]; then printf '\033[38;5;220m'; fi; }   # bright gold
-session_color() { 
-  rem_pct=$(( 100 - session_pct ))
-  if   (( rem_pct <= 10 )); then SCLR='38;5;210'  # light pink
-  elif (( rem_pct <= 25 )); then SCLR='38;5;228'  # light yellow  
-  else                          SCLR='38;5;194'; fi  # light green
+session_color() {
+  if   (( session_pct >= 90 )); then SCLR='38;5;203'   # red >=90%
+  elif (( session_pct >= 70 )); then SCLR='38;5;228'   # yellow >=70%
+  else                               SCLR='38;5;158'; fi  # green <70%
   if [ "$use_color" -eq 1 ]; then printf '\033[%sm' "$SCLR"; fi
 }
 
@@ -234,72 +233,110 @@ else
   fi
 fi
 
-# Session reset time requires ccusage (only feature that needs external tool)
-if command -v ccusage >/dev/null 2>&1 && [ "$HAS_JQ" -eq 1 ]; then
-  blocks_output=""
+# ---- token expiry (from credentials file) ----
+token_txt=""; token_pct=0; token_bar=""
+token_color() {
+  if [ "$use_color" -eq 1 ]; then printf '\033[38;5;194m'; fi  # default green
+}
 
-  # Try ccusage with timeout
-  if command -v timeout >/dev/null 2>&1; then
-    blocks_output=$(timeout 5s ccusage blocks --json 2>/dev/null)
-  elif command -v gtimeout >/dev/null 2>&1; then
-    blocks_output=$(gtimeout 5s ccusage blocks --json 2>/dev/null)
-  else
-    blocks_output=$(ccusage blocks --json 2>/dev/null)
-  fi
+CREDS_FILE="$HOME/.claude/.credentials.json"
+if [ -f "$CREDS_FILE" ] && [ "$HAS_JQ" -eq 1 ]; then
+  expires_ms=$(jq -r '.claudeAiOauth.expiresAt // empty' "$CREDS_FILE" 2>/dev/null)
 
-  if [ -n "$blocks_output" ]; then
-    active_block=$(echo "$blocks_output" | jq -c '.blocks[] | select(.isActive == true)' 2>/dev/null | head -n1)
-    if [ -n "$active_block" ]; then
-      # Session time calculation from ccusage
-      reset_time_str=$(echo "$active_block" | jq -r '.usageLimitResetTime // .endTime // empty')
-      start_time_str=$(echo "$active_block" | jq -r '.startTime // empty')
+  if [ -n "$expires_ms" ]; then
+    expires_sec=$(( expires_ms / 1000 ))
+    now_sec=$(date +%s)
+    token_remaining=$(( expires_sec - now_sec ))
 
-      if [ -n "$reset_time_str" ] && [ -n "$start_time_str" ]; then
-        start_sec=$(to_epoch "$start_time_str"); end_sec=$(to_epoch "$reset_time_str"); now_sec=$(date +%s)
-        total=$(( end_sec - start_sec )); (( total<1 )) && total=1
-        elapsed=$(( now_sec - start_sec )); (( elapsed<0 ))&&elapsed=0; (( elapsed>total ))&&elapsed=$total
-        session_pct=$(( elapsed * 100 / total ))
-        remaining=$(( end_sec - now_sec )); (( remaining<0 )) && remaining=0
-        rh=$(( remaining / 3600 )); rm=$(( (remaining % 3600) / 60 ))
-        end_hm=$(fmt_time_hm "$end_sec")
-        session_txt="$(printf '%dh %dm until reset at %s (%d%%)' "$rh" "$rm" "$end_hm" "$session_pct")"
-        session_bar=$(progress_bar "$session_pct" 10)
+    if [ "$token_remaining" -le 0 ]; then
+      token_txt="EXPIRED"
+      token_color() { if [ "$use_color" -eq 1 ]; then printf '\033[38;5;203m'; fi; }
+    else
+      token_expiry_hm=$(fmt_time_hm "$expires_sec")
+      if [ "$token_remaining" -lt 3600 ]; then
+        token_color() { if [ "$use_color" -eq 1 ]; then printf '\033[38;5;203m'; fi; }  # red <1h
+      elif [ "$token_remaining" -lt 7200 ]; then
+        token_color() { if [ "$use_color" -eq 1 ]; then printf '\033[38;5;228m'; fi; }  # yellow <2h
       fi
+      token_txt="$(token_color)●$(rst) Expires $token_expiry_hm"
     fi
   fi
 fi
 
-# ---- weekly cost (cached, refreshes every 5 minutes) ----
-weekly_cost=""
-weekly_cache="/tmp/.ccusage_weekly_cache"
-cache_max_age=300  # 5 minutes
+# ---- rate limits (native from Claude Code stdin, available since v2.1.80) ----
+if [ "$HAS_JQ" -eq 1 ]; then
+  five_hr_pct=$(echo "$input" | jq -r '.rate_limits.five_hour.used_percentage // empty' 2>/dev/null)
+  five_hr_reset=$(echo "$input" | jq -r '.rate_limits.five_hour.resets_at // empty' 2>/dev/null)
+  seven_day_pct=$(echo "$input" | jq -r '.rate_limits.seven_day.used_percentage // empty' 2>/dev/null)
 
-needs_refresh=1
-if [ -f "$weekly_cache" ]; then
-  if command -v stat >/dev/null 2>&1; then
-    cache_mtime=$(stat -f %m "$weekly_cache" 2>/dev/null || stat -c %Y "$weekly_cache" 2>/dev/null || echo 0)
-    now_sec=$(date +%s)
-    cache_age=$(( now_sec - cache_mtime ))
-    [ "$cache_age" -lt "$cache_max_age" ] && needs_refresh=0
+  if [ -n "$five_hr_pct" ]; then
+    session_pct=$(printf '%.0f' "$five_hr_pct")
+    session_bar=$(progress_bar "$session_pct" 10)
+
+    if [ -n "$five_hr_reset" ]; then
+      now_sec=$(date +%s)
+      remaining=$(( five_hr_reset - now_sec )); (( remaining < 0 )) && remaining=0
+      rh=$(( remaining / 3600 )); rm=$(( (remaining % 3600) / 60 ))
+      end_hm=$(fmt_time_hm "$five_hr_reset")
+      session_time="$(printf '%dh %dm left' "$rh" "$rm")"
+      session_reset="$(printf 'Reset @ %s' "$end_hm")"
+      session_txt="$(printf '%s · %d%% [%s] · %s' "$session_time" "$session_pct" "$session_bar" "$session_reset")"
+      session_bar=""
+    else
+      session_txt="$(printf '%d%% [%s]' "$session_pct" "$session_bar")"
+      session_bar=""
+    fi
+  fi
+
+  if [ -n "$seven_day_pct" ]; then
+    weekly_pct=$(printf '%.0f' "$seven_day_pct")
   fi
 fi
 
-if [ "$needs_refresh" -eq 1 ] && command -v ccusage >/dev/null 2>&1 && [ "$HAS_JQ" -eq 1 ]; then
-  weekly_json=$(ccusage weekly --json --offline 2>/dev/null)
-  if [ -n "$weekly_json" ]; then
-    weekly_cost=$(echo "$weekly_json" | jq -r '.weekly[-1].totalCost // 0' 2>/dev/null | awk '{printf "%.2f", $1}')
-    echo "$weekly_cost" > "$weekly_cache" 2>/dev/null
+
+# ---- extended git info ----
+git_ahead=""
+git_behind=""
+git_staged=0
+git_modified=0
+git_untracked=0
+if [ -n "$git_branch" ]; then
+  # Ahead/behind remote
+  upstream=$(git rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null)
+  if [ -n "$upstream" ]; then
+    git_ahead=$(git rev-list --count "${upstream}..HEAD" 2>/dev/null)
+    git_behind=$(git rev-list --count "HEAD..${upstream}" 2>/dev/null)
   fi
-elif [ -f "$weekly_cache" ]; then
-  weekly_cost=$(cat "$weekly_cache" 2>/dev/null)
+  # Working tree status counts
+  while IFS= read -r line; do
+    xy="${line:0:2}"
+    x="${xy:0:1}"
+    y="${xy:1:1}"
+    [ "$x" = "?" ] && (( git_untracked++ )) && continue
+    [ "$x" != " " ] && [ "$x" != "?" ] && (( git_staged++ ))
+    [ "$y" != " " ] && [ "$y" != "?" ] && (( git_modified++ ))
+  done < <(git status --porcelain 2>/dev/null)
 fi
+
+# ---- profile badge ----
+profile_color() { if [ "$use_color" -eq 1 ]; then printf '\033[1;38;5;255m'; fi; }  # bold white
 
 # ---- render statusline ----
-# Line 1: Core info (directory, git, model, claude code version, output style)
-printf '📁 %s%s%s' "$(dir_color)" "$current_dir" "$(rst)"
-if [ -n "$git_branch" ]; then
-  printf '  🌿 %s%s%s' "$(git_color)" "$git_branch" "$(rst)"
+# Line 1: Profile badge (if set) + directory + model + version + style
+if [ -n "${CLAUDE_PROFILE:-}" ]; then
+  case "${CLAUDE_PROFILE^^}" in
+    PSD*)      badge_bg='\033[48;5;22m';  badge_label=" PSD " ;;       # dark forest green bg
+    PERSONAL*) badge_bg='\033[48;5;91m';  badge_label=" Personal " ;;  # purple bg
+    *)         badge_bg='\033[48;5;236m'; badge_label=" ${CLAUDE_PROFILE} " ;;
+  esac
+  if [ "$use_color" -eq 1 ]; then
+    printf '%b\033[1;38;5;255m%s\033[0m' "$badge_bg" "$badge_label"
+  else
+    printf '[%s]' "$CLAUDE_PROFILE"
+  fi
+  printf '  '
 fi
+printf '📁 %s%s%s' "$(dir_color)" "$current_dir" "$(rst)"
 printf '  🤖 %s%s%s' "$(model_color)" "$model_name" "$(rst)"
 if [ -n "$model_version" ] && [ "$model_version" != "null" ]; then
   printf '  🏷️ %s%s%s' "$(version_color)" "$model_version" "$(rst)"
@@ -311,39 +348,111 @@ if [ -n "$output_style" ] && [ "$output_style" != "null" ]; then
   printf '  🎨 %s%s%s' "$(style_color)" "$output_style" "$(rst)"
 fi
 
-# Line 2: Context and session time
-line2=""
-if [ -n "$context_pct" ]; then
-  context_bar=$(progress_bar "$context_used_pct" 10)
-  line2="🧠 $(context_color)Context Used: ${context_pct} [${context_bar}]$(rst)"
-fi
-if [ -n "$session_txt" ]; then
-  if [ -n "$line2" ]; then
-    line2="$line2  ⌛ $(session_color)${session_txt}$(rst) $(session_color)[${session_bar}]$(rst)"
-  else
-    line2="⌛ $(session_color)${session_txt}$(rst) $(session_color)[${session_bar}]$(rst)"
+# Line 2: Git info
+if [ -n "$git_branch" ]; then
+  printf '\n🌿 %s%s%s' "$(git_color)" "$git_branch" "$(rst)"
+  # Ahead/behind
+  if [ -n "$git_ahead" ] && [ -n "$git_behind" ]; then
+    [ "$git_ahead" -gt 0 ] && printf '  %s↑%s%s' "$(git_color)" "$git_ahead" "$(rst)"
+    [ "$git_behind" -gt 0 ] && printf '  %s↓%s%s' "$(git_color)" "$git_behind" "$(rst)"
   fi
-fi
-if [ -z "$line2" ] && [ -z "$context_pct" ]; then
-  line2="🧠 $(context_color)Context Used: TBD$(rst)"
+  # Staged / modified / untracked
+  [ "$git_staged" -gt 0 ]   && printf '  %s●%s staged:%s%s' "$(git_color)" "$(rst)" "$git_staged" "$(rst)"
+  [ "$git_modified" -gt 0 ] && printf '  %s~%s modified:%s%s' "$(git_color)" "$(rst)" "$git_modified" "$(rst)"
+  [ "$git_untracked" -gt 0 ] && printf '  %s?%s untracked:%s%s' "$(git_color)" "$(rst)" "$git_untracked" "$(rst)"
 fi
 
-# Line 3: Token usage
+# Line 3: Context + auth token
 line3=""
+if [ -n "$context_pct" ]; then
+  context_bar=$(progress_bar "$context_used_pct" 10)
+  line3="🧠 $(context_color)Context Used: ${context_pct} [${context_bar}]$(rst)"
+else
+  line3="🧠 $(context_color)Context Used: TBD$(rst)"
+fi
+if [ -n "$token_txt" ]; then
+  line3="$line3  🔑 $(token_color)${token_txt}$(rst)"
+fi
+
+# Line 4: Token usage + cost + session reset
+line4=""
 if [ -n "$tot_tokens" ] && [[ "$tot_tokens" =~ ^[0-9]+$ ]]; then
   if [ -n "$tpm" ] && [[ "$tpm" =~ ^[0-9.]+$ ]]; then
     tpm_formatted=$(printf '%.0f' "$tpm")
-    line3="📊 $(usage_color)${tot_tokens} tok (${tpm_formatted} tpm)$(rst)"
+    line4="📊 $(usage_color)${tot_tokens} tok (${tpm_formatted} tpm)$(rst)"
   else
-    line3="📊 $(usage_color)${tot_tokens} tok$(rst)"
+    line4="📊 $(usage_color)${tot_tokens} tok$(rst)"
+  fi
+fi
+
+# Cost display
+cost_txt=""
+if [ -n "$cost_usd" ] && [[ "$cost_usd" =~ ^[0-9.]+$ ]]; then
+  cost_fmt=$(printf '$%.4f' "$cost_usd")
+  if [ -n "$cost_per_hour" ] && [[ "$cost_per_hour" =~ ^[0-9.]+$ ]]; then
+    cph_fmt=$(printf '$%.2f/hr' "$cost_per_hour")
+    cost_txt="$(cost_color)${cost_fmt} · ${cph_fmt}$(rst)"
+  else
+    cost_txt="$(cost_color)${cost_fmt}$(rst)"
+  fi
+fi
+if [ -n "$cost_txt" ]; then
+  if [ -n "$line4" ]; then
+    line4="$line4  💰 ${cost_txt}"
+  else
+    line4="💰 ${cost_txt}"
+  fi
+fi
+
+# Session limit line (personal profile only — set SHOW_SESSION_LIMIT=1 in settings.json env)
+line_session=""
+if [ "${SHOW_SESSION_LIMIT:-0}" = "1" ] && [ -n "$five_hr_pct" ]; then
+  sl_pct=$(printf '%.0f' "$five_hr_pct")
+  sl_bar=$(progress_bar "$sl_pct" 12)
+
+  # Color: green → yellow → orange → red
+  sl_color() {
+    if   (( sl_pct >= 90 )); then printf '\033[38;5;203m'  # red
+    elif (( sl_pct >= 70 )); then printf '\033[38;5;215m'  # orange
+    elif (( sl_pct >= 40 )); then printf '\033[38;5;228m'  # yellow
+    else                          printf '\033[38;5;158m'; fi  # green
+  }
+  if [ "$use_color" -ne 1 ]; then sl_color() { :; }; fi
+
+  sl_txt="$(sl_color)${sl_pct}% [${sl_bar}]$(rst)"
+
+  if [ -n "$five_hr_reset" ]; then
+    now_sec=$(date +%s)
+    remaining=$(( five_hr_reset - now_sec )); (( remaining < 0 )) && remaining=0
+    rh=$(( remaining / 3600 )); rm=$(( (remaining % 3600) / 60 ))
+    end_hm=$(fmt_time_hm "$five_hr_reset")
+    sl_txt="$sl_txt  $(sl_color)${rh}h ${rm}m left · resets ${end_hm}$(rst)"
+  fi
+
+  # Also show 7-day if available
+  if [ -n "${weekly_pct:-}" ]; then
+    wk_bar=$(progress_bar "$weekly_pct" 8)
+    sl_txt="$sl_txt  $(sl_color)7d: ${weekly_pct}% [${wk_bar}]$(rst)"
+  fi
+
+  line_session="⏱ Session: ${sl_txt}"
+elif [ -n "$session_txt" ]; then
+  # Fallback: append to line4 when SHOW_SESSION_LIMIT is not set
+  if [ -n "$line4" ]; then
+    line4="$line4  ⌛ $(session_color)${session_txt}$(rst)"
+  else
+    line4="⌛ $(session_color)${session_txt}$(rst)"
   fi
 fi
 
 # Print lines
-if [ -n "$line2" ]; then
-  printf '\n%s' "$line2"
-fi
 if [ -n "$line3" ]; then
   printf '\n%s' "$line3"
+fi
+if [ -n "$line4" ]; then
+  printf '\n%s' "$line4"
+fi
+if [ -n "$line_session" ]; then
+  printf '\n%s' "$line_session"
 fi
 printf '\n'
