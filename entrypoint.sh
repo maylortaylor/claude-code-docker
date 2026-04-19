@@ -12,6 +12,10 @@ find /usr /bin /sbin -perm /6000 -type f -exec chmod a-s {} + 2>/dev/null || tru
 chown -R claude:claude /home/claude/.claude 2>/dev/null || true
 chown -R claude:claude /workspace 2>/dev/null || true
 
+# Link nested plugin skills into ~/.claude/skills/ for Claude Code auto-discovery
+# Handles plugins that organize skills under category subdirs (e.g. skills/dev/<name>/)
+/usr/local/bin/link-plugin-skills.sh || true
+
 # Copy credentials extracted from host keychain (overwrites mounted version)
 if [ -f /mnt/host-credentials.json ]; then
   cp /mnt/host-credentials.json /home/claude/.claude/.credentials.json

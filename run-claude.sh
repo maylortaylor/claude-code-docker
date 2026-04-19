@@ -59,6 +59,12 @@ if [ -f "$CONF" ]; then
   source "$CONF"
 fi
 
+# ── Screenshots cleanup (delete files older than 7 days) ─────────
+SCREENSHOTS_DIR="${WORKSPACE_DIR:-$PWD}/screenshots"
+if [ -d "$SCREENSHOTS_DIR" ]; then
+  find "$SCREENSHOTS_DIR" -maxdepth 1 -type f -mtime +7 -delete 2>/dev/null || true
+fi
+
 # ── Defaults ─────────────────────────────────────────────────────
 IMAGE_NAME="${IMAGE_NAME:-claude-code}"
 AUTH_METHOD="${AUTH_METHOD:-keychain}"
@@ -199,6 +205,18 @@ if [ -n "${EXTRA_ALLOWED_DOMAINS:-}" ]; then
   EXTRA_ENV+=(-e "EXTRA_ALLOWED_DOMAINS=$EXTRA_ALLOWED_DOMAINS")
 fi
 
+# ── DEV_ROOT passthrough (used by link-plugin-skills.sh for path translation) ──
+[ -n "${DEV_ROOT:-}" ] && EXTRA_ENV+=(-e "DEV_ROOT=$DEV_ROOT")
+
+# ── GitLab credentials passthrough ──────────────────────────────
+[ -n "${GITLAB_TOKEN:-}"          ] && EXTRA_ENV+=(-e "GITLAB_TOKEN=$GITLAB_TOKEN")
+[ -n "${GITLAB_ACCESS_TOKEN:-}"   ] && EXTRA_ENV+=(-e "GITLAB_ACCESS_TOKEN=$GITLAB_ACCESS_TOKEN")
+[ -n "${GITLAB_HOST:-}"           ] && EXTRA_ENV+=(-e "GITLAB_HOST=$GITLAB_HOST")
+
+# ── Atlassian credentials passthrough ───────────────────────────
+[ -n "${ATLASSIAN_EMAIL:-}"     ] && EXTRA_ENV+=(-e "ATLASSIAN_EMAIL=$ATLASSIAN_EMAIL")
+[ -n "${ATLASSIAN_API_TOKEN:-}" ] && EXTRA_ENV+=(-e "ATLASSIAN_API_TOKEN=$ATLASSIAN_API_TOKEN")
+
 # ── Open web browsing (OPEN_WEB=true in conf unlocks all HTTP/HTTPS) ─────────
 if [ "${OPEN_WEB:-false}" = "true" ]; then
   EXTRA_ENV+=(-e "OPEN_WEB=true")
@@ -223,8 +241,10 @@ fi
 
 # ── Mac filesystem mounts ─────────────────────────────────────────────────────
 MAC_FS_ARGS=()
-[ -d "$HOME/Documents/_dev" ] && MAC_FS_ARGS+=(-v "$HOME/Documents/_dev:/mac/_dev")
-[ -f "$HOME/.zshrc" ]         && MAC_FS_ARGS+=(-v "$HOME/.zshrc:/mac/.zshrc")
+[ -d "$HOME/Documents/_dev" ]    && MAC_FS_ARGS+=(-v "$HOME/Documents/_dev:/mac/_dev")
+[ -f "$HOME/.zshrc" ]            && MAC_FS_ARGS+=(-v "$HOME/.zshrc:/mac/.zshrc")
+[ -f "$HOME/.gitlab-creds" ]     && MAC_FS_ARGS+=(-v "$HOME/.gitlab-creds:/mac/.gitlab-creds:ro")
+[ -f "$HOME/.atlassian-creds" ]  && MAC_FS_ARGS+=(-v "$HOME/.atlassian-creds:/home/claude/.atlassian-creds:ro")
 
 # ── Container name ───────────────────────────────────────────────
 CONTAINER_NAME="claude-${SESSION_NAME}"

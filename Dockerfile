@@ -31,7 +31,8 @@ RUN npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}
 # Copy firewall + entrypoint scripts (root-owned, not writable by claude)
 COPY init-firewall.sh /usr/local/bin/
 COPY entrypoint.sh /usr/local/bin/
-RUN chmod +x /usr/local/bin/init-firewall.sh /usr/local/bin/entrypoint.sh
+COPY link-plugin-skills.sh /usr/local/bin/
+RUN chmod +x /usr/local/bin/init-firewall.sh /usr/local/bin/entrypoint.sh /usr/local/bin/link-plugin-skills.sh
 
 WORKDIR /workspace
 
