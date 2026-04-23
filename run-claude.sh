@@ -208,6 +208,9 @@ fi
 # ── DEV_ROOT passthrough (used by link-plugin-skills.sh for path translation) ──
 [ -n "${DEV_ROOT:-}" ] && EXTRA_ENV+=(-e "DEV_ROOT=$DEV_ROOT")
 
+# ── AI_KB passthrough (used by git-workflow and workflow-setup skills) ──────
+[ -n "${AI_KB:-}" ] && EXTRA_ENV+=(-e "AI_KB=$AI_KB")
+
 # ── GitLab credentials passthrough ──────────────────────────────
 [ -n "${GITLAB_TOKEN:-}"          ] && EXTRA_ENV+=(-e "GITLAB_TOKEN=$GITLAB_TOKEN")
 [ -n "${GITLAB_ACCESS_TOKEN:-}"   ] && EXTRA_ENV+=(-e "GITLAB_ACCESS_TOKEN=$GITLAB_ACCESS_TOKEN")
@@ -221,6 +224,9 @@ fi
 if [ "${OPEN_WEB:-false}" = "true" ]; then
   EXTRA_ENV+=(-e "OPEN_WEB=true")
 fi
+
+# ── CLAUDE_PROFILE passthrough (drives statusline badge: personal vs PSD) ────
+[ -n "${CLAUDE_PROFILE:-}" ] && EXTRA_ENV+=(-e "CLAUDE_PROFILE=$CLAUDE_PROFILE")
 
 # ── Build ────────────────────────────────────────────────────────
 docker build -t "$IMAGE_NAME" -f "$SCRIPT_DIR/Dockerfile" "$SCRIPT_DIR"

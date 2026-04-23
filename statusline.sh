@@ -19,13 +19,21 @@ use_color=1
 C() { if [ "$use_color" -eq 1 ]; then printf '\033[%sm' "$1"; fi; }
 RST() { if [ "$use_color" -eq 1 ]; then printf '\033[0m'; fi; }
 
-# ---- modern sleek colors ----
+# ---- PSD colors (cool/professional) ----
 dir_color() { if [ "$use_color" -eq 1 ]; then printf '\033[38;5;117m'; fi; }    # sky blue
-model_color() { if [ "$use_color" -eq 1 ]; then printf '\033[38;5;147m'; fi; }  # light purple  
+model_color() { if [ "$use_color" -eq 1 ]; then printf '\033[38;5;147m'; fi; }  # light purple
 version_color() { if [ "$use_color" -eq 1 ]; then printf '\033[38;5;180m'; fi; } # soft yellow
 cc_version_color() { if [ "$use_color" -eq 1 ]; then printf '\033[38;5;249m'; fi; } # light gray
 style_color() { if [ "$use_color" -eq 1 ]; then printf '\033[38;5;245m'; fi; } # gray
 rst() { if [ "$use_color" -eq 1 ]; then printf '\033[0m'; fi; }
+
+# ---- ME (personal) colors (warm/vibrant) ----
+me_dir_color()     { if [ "$use_color" -eq 1 ]; then printf '\033[38;5;214m'; fi; }  # warm amber
+me_git_color()     { if [ "$use_color" -eq 1 ]; then printf '\033[38;5;213m'; fi; }  # hot pink
+me_model_color()   { if [ "$use_color" -eq 1 ]; then printf '\033[38;5;87m';  fi; }  # electric cyan
+me_version_color() { if [ "$use_color" -eq 1 ]; then printf '\033[38;5;220m'; fi; }  # bright yellow
+me_cc_color()      { if [ "$use_color" -eq 1 ]; then printf '\033[38;5;159m'; fi; }  # light teal
+me_style_color()   { if [ "$use_color" -eq 1 ]; then printf '\033[38;5;219m'; fi; }  # lavender pink
 
 # ---- time helpers ----
 to_epoch() {
@@ -87,6 +95,17 @@ extract_json_string() {
   fi
 }
 
+# ---- profile detection (personal vs PSD vs neutral) ----
+profile_mode=""
+if [ "${CLAUDE_PROFILE:-}" = "personal" ]; then
+  profile_mode="personal"
+elif [ -d "$HOME/.claude-psd" ] || \
+     [ -n "${ANTHROPIC_AUTH_TOKEN:-}" ] || \
+     [ -n "${ANTHROPIC_API_KEY:-}" ] || \
+     echo "${ANTHROPIC_BASE_URL:-}" | grep -qi "polestardefense"; then
+  profile_mode="PSD"
+fi
+
 # ---- basics ----
 if [ "$HAS_JQ" -eq 1 ]; then
   current_dir=$(echo "$input" | jq -r '.workspace.current_dir // .cwd // "unknown"' 2>/dev/null | sed "s|^$HOME|~|g")
@@ -99,20 +118,20 @@ else
   # Bash fallback for JSON extraction
   # Extract current_dir from workspace object - look for the pattern workspace":{"current_dir":"..."}
   current_dir=$(echo "$input" | grep -o '"workspace"[[:space:]]*:[[:space:]]*{[^}]*"current_dir"[[:space:]]*:[[:space:]]*"[^"]*"' | sed 's/.*"current_dir"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/' | sed 's/\\\\/\//g')
-  
+
   # Fall back to cwd if workspace extraction failed
   if [ -z "$current_dir" ] || [ "$current_dir" = "null" ]; then
     current_dir=$(echo "$input" | grep -o '"cwd"[[:space:]]*:[[:space:]]*"[^"]*"' | sed 's/.*"cwd"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/' | sed 's/\\\\/\//g')
   fi
-  
+
   # Fallback to unknown if all extraction failed
   [ -z "$current_dir" ] && current_dir="unknown"
   current_dir=$(echo "$current_dir" | sed "s|^$HOME|~|g")
-  
+
   # Extract model name from nested model object
   model_name=$(echo "$input" | grep -o '"model"[[:space:]]*:[[:space:]]*{[^}]*"display_name"[[:space:]]*:[[:space:]]*"[^"]*"' | sed 's/.*"display_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/')
   [ -z "$model_name" ] && model_name="Claude"
-  # Model version is in the model ID, not a separate field  
+  # Model version is in the model ID, not a separate field
   model_version=""  # Not available in Claude Code JSON
   session_id=$(extract_json_string "$input" "session_id" "")
   # CC version is at the root level
@@ -295,47 +314,100 @@ elif [ -f "$weekly_cache" ]; then
 fi
 
 # ---- render statusline ----
-# Line 1: Core info (directory, git, model, claude code version, output style)
-printf '📁 %s%s%s' "$(dir_color)" "$current_dir" "$(rst)"
-if [ -n "$git_branch" ]; then
-  printf '  🌿 %s%s%s' "$(git_color)" "$git_branch" "$(rst)"
-fi
-printf '  🤖 %s%s%s' "$(model_color)" "$model_name" "$(rst)"
-if [ -n "$model_version" ] && [ "$model_version" != "null" ]; then
-  printf '  🏷️ %s%s%s' "$(version_color)" "$model_version" "$(rst)"
-fi
-if [ -n "$cc_version" ] && [ "$cc_version" != "null" ]; then
-  printf '  📟 %sv%s%s' "$(cc_version_color)" "$cc_version" "$(rst)"
-fi
-if [ -n "$output_style" ] && [ "$output_style" != "null" ]; then
-  printf '  🎨 %s%s%s' "$(style_color)" "$output_style" "$(rst)"
-fi
-
-# Line 2: Context and session time
-line2=""
-if [ -n "$context_pct" ]; then
-  context_bar=$(progress_bar "$context_used_pct" 10)
-  line2="🧠 $(context_color)Context Used: ${context_pct} [${context_bar}]$(rst)"
-fi
-if [ -n "$session_txt" ]; then
-  if [ -n "$line2" ]; then
-    line2="$line2  ⌛ $(session_color)${session_txt}$(rst) $(session_color)[${session_bar}]$(rst)"
-  else
-    line2="⌛ $(session_color)${session_txt}$(rst) $(session_color)[${session_bar}]$(rst)"
+if [ "$profile_mode" = "personal" ]; then
+  # ── ME (personal) layout ──────────────────────────────────────────
+  # Line 1: ME badge, then personal icons + warm colors
+  printf '%s ME %s  ' "$(C '1;38;5;208;48;5;52')" "$(rst)"
+  printf '🏠 %s%s%s' "$(me_dir_color)" "$current_dir" "$(rst)"
+  if [ -n "$git_branch" ]; then
+    printf '  🌸 %s%s%s' "$(me_git_color)" "$git_branch" "$(rst)"
   fi
-fi
-if [ -z "$line2" ] && [ -z "$context_pct" ]; then
-  line2="🧠 $(context_color)Context Used: TBD$(rst)"
-fi
+  printf '  💡 %s%s%s' "$(me_model_color)" "$model_name" "$(rst)"
+  if [ -n "$model_version" ] && [ "$model_version" != "null" ]; then
+    printf '  🏷️ %s%s%s' "$(me_version_color)" "$model_version" "$(rst)"
+  fi
+  if [ -n "$cc_version" ] && [ "$cc_version" != "null" ]; then
+    printf '  💻 %sv%s%s' "$(me_cc_color)" "$cc_version" "$(rst)"
+  fi
+  if [ -n "$output_style" ] && [ "$output_style" != "null" ]; then
+    printf '  🎨 %s%s%s' "$(me_style_color)" "$output_style" "$(rst)"
+  fi
 
-# Line 3: Token usage
-line3=""
-if [ -n "$tot_tokens" ] && [[ "$tot_tokens" =~ ^[0-9]+$ ]]; then
-  if [ -n "$tpm" ] && [[ "$tpm" =~ ^[0-9.]+$ ]]; then
-    tpm_formatted=$(printf '%.0f' "$tpm")
-    line3="📊 $(usage_color)${tot_tokens} tok (${tpm_formatted} tpm)$(rst)"
-  else
-    line3="📊 $(usage_color)${tot_tokens} tok$(rst)"
+  # Line 2: Context and session limit
+  line2=""
+  if [ -n "$context_pct" ]; then
+    context_bar=$(progress_bar "$context_used_pct" 10)
+    line2="💭 $(context_color)Context Used: ${context_pct} [${context_bar}]$(rst)"
+  fi
+  if [ -n "$session_txt" ]; then
+    if [ -n "$line2" ]; then
+      line2="$line2  ⏰ $(session_color)${session_txt}$(rst) $(session_color)[${session_bar}]$(rst)"
+    else
+      line2="⏰ $(session_color)${session_txt}$(rst) $(session_color)[${session_bar}]$(rst)"
+    fi
+  fi
+  if [ -z "$line2" ] && [ -z "$context_pct" ]; then
+    line2="💭 $(context_color)Context Used: TBD$(rst)"
+  fi
+
+  # Line 3: Token usage
+  line3=""
+  if [ -n "$tot_tokens" ] && [[ "$tot_tokens" =~ ^[0-9]+$ ]]; then
+    if [ -n "$tpm" ] && [[ "$tpm" =~ ^[0-9.]+$ ]]; then
+      tpm_formatted=$(printf '%.0f' "$tpm")
+      line3="📈 $(usage_color)${tot_tokens} tok (${tpm_formatted} tpm)$(rst)"
+    else
+      line3="📈 $(usage_color)${tot_tokens} tok$(rst)"
+    fi
+  fi
+
+else
+  # ── PSD / neutral layout (original) ──────────────────────────────
+  # Line 1: PSD badge (if PSD), then directory, git, model, version, style
+  if [ "$profile_mode" = "PSD" ]; then
+    printf '%s PSD %s  ' "$(C '1;38;5;22;48;5;255')" "$(rst)"
+  fi
+  printf '📁 %s%s%s' "$(dir_color)" "$current_dir" "$(rst)"
+  if [ -n "$git_branch" ]; then
+    printf '  🌿 %s%s%s' "$(git_color)" "$git_branch" "$(rst)"
+  fi
+  printf '  🤖 %s%s%s' "$(model_color)" "$model_name" "$(rst)"
+  if [ -n "$model_version" ] && [ "$model_version" != "null" ]; then
+    printf '  🏷️ %s%s%s' "$(version_color)" "$model_version" "$(rst)"
+  fi
+  if [ -n "$cc_version" ] && [ "$cc_version" != "null" ]; then
+    printf '  📟 %sv%s%s' "$(cc_version_color)" "$cc_version" "$(rst)"
+  fi
+  if [ -n "$output_style" ] && [ "$output_style" != "null" ]; then
+    printf '  🎨 %s%s%s' "$(style_color)" "$output_style" "$(rst)"
+  fi
+
+  # Line 2: Context and session time
+  line2=""
+  if [ -n "$context_pct" ]; then
+    context_bar=$(progress_bar "$context_used_pct" 10)
+    line2="🧠 $(context_color)Context Used: ${context_pct} [${context_bar}]$(rst)"
+  fi
+  if [ -n "$session_txt" ]; then
+    if [ -n "$line2" ]; then
+      line2="$line2  ⌛ $(session_color)${session_txt}$(rst) $(session_color)[${session_bar}]$(rst)"
+    else
+      line2="⌛ $(session_color)${session_txt}$(rst) $(session_color)[${session_bar}]$(rst)"
+    fi
+  fi
+  if [ -z "$line2" ] && [ -z "$context_pct" ]; then
+    line2="🧠 $(context_color)Context Used: TBD$(rst)"
+  fi
+
+  # Line 3: Token usage
+  line3=""
+  if [ -n "$tot_tokens" ] && [[ "$tot_tokens" =~ ^[0-9]+$ ]]; then
+    if [ -n "$tpm" ] && [[ "$tpm" =~ ^[0-9.]+$ ]]; then
+      tpm_formatted=$(printf '%.0f' "$tpm")
+      line3="📊 $(usage_color)${tot_tokens} tok (${tpm_formatted} tpm)$(rst)"
+    else
+      line3="📊 $(usage_color)${tot_tokens} tok$(rst)"
+    fi
   fi
 fi
 

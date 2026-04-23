@@ -27,6 +27,7 @@ RUN useradd -m -s /bin/bash claude && \
 ENV DEVCONTAINER=true
 ENV CLAUDE_CODE_DISABLE_AUTO_UPDATE=1
 RUN npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}
+RUN npm install -g ccusage
 
 # Copy firewall + entrypoint scripts (root-owned, not writable by claude)
 COPY init-firewall.sh /usr/local/bin/
